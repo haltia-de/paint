@@ -10,6 +10,9 @@
 - Справа кнопки: крупнее, мельче, вся картина, «где?» (ближайшая незакрашенная
   область выбранного цвета), отмена, «посмотреть» готовую картину.
 - Прогресс сохраняется после каждого нажатия в `~/.local/share/b8k-paint/`.
+- Обычная GTK-программа `io.github.trudenboy.Paint` для любого рабочего
+  стола; на планшете оболочка b8k даёт ей вибрацию касаний, крупную шапку и
+  диалоги своей темой GTK.
 - 37 встроенных картин в общественном достоянии (Айвазовский, Шишкин,
   Левитан, Куинджи, Хокусай, Ван Гог и другие), около 300 и около 600
   областей; `make-paintings.py` делает их из файлов Wikimedia Commons.
@@ -36,35 +39,38 @@ python3 make-paintings.py CACHE_DIR [slug...]           # встроенные �
 
 ## Установка
 
-Нужны Python 3, GTK 3, PyGObject, pycairo, Pillow, а для своих фотографий и
-«+ Найти» ещё numpy и scipy. В Alpine:
+Нужны Python 3, GTK 3, PyGObject, pycairo, Pillow,
+[b8k-compat](https://github.com/trudenboy/b8k-compat), а для своих фотографий
+и «+ Найти» ещё numpy и scipy. В Alpine:
 
 ```
-apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy
+apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy py3-b8k-compat
 ```
+
+Пакет для Alpine: `packaging/alpine/APKBUILD`.
 
 Поставить в систему (нужен root):
 
 ```
-sh install.sh            # в /
-sh install.sh /mnt/root  # в другой корень, например при сборке образа
+sh install.sh                 # в /usr/local
+sh install.sh /mnt/root       # в другой корень, например при сборке образа
+sh install.sh "$pkgdir" /usr  # с префиксом /usr, как в пакете
 ```
 
-`install.sh` кладёт программу в `/usr/local/bin/b8k-paint`, генератор в
-`/usr/local/lib/b8k-paint/pbn.py`, картины в
-`/usr/local/share/b8k/paint/`, значок и раздел для
-панели оболочки в `/usr/local/share/b8k/apps.d/paint.conf`.
+`install.sh [ROOT] [PREFIX]` кладёт программу в `PREFIX/bin/b8k-paint`,
+генератор в `PREFIX/lib/b8k-paint/pbn.py`, картины в `PREFIX/share/b8k-paint/`,
+`.desktop`-файл, значок hicolor и metainfo; старый раздел оболочки
+(`/usr/local/share/b8k/apps.d/paint.conf`) и картины версии 2 убирает.
 
 ## Оболочка планшета
 
 Программа сделана для оболочки
 [lenovo-b8000h-linux](https://github.com/trudenboy/lenovo-b8000h-linux)
 (Linux на Lenovo YOGA Tablet 10 B8000-H), её сборка ставит программу
-отсюда по тегу. Если в системе есть модуль оболочки
-`/usr/local/share/b8k/python/b8k_ui.py`, программа берёт из него вибрацию на
-нажатия, общий вид заголовка и вопрос «Стереть?» в стиле
-оболочки. Без него она работает на любом рабочем
-столе с GTK 3.
+отсюда по тегу. С оболочкой она связана только стандартами freedesktop:
+`.desktop`-файл с `X-B8K-Home=true` и `X-B8K-Replaces=paint` выводит её на
+домашний экран вместо прежней кнопки. Без оболочки работает на любом
+рабочем столе с GTK 3.
 
 ## Лицензия
 

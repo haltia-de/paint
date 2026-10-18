@@ -13,7 +13,13 @@ Russian; code, comments, docstrings and commit messages are in English
 (British spelling: "colour").
 
 It was split out of lenovo-b8000h-linux; the shell's image build installs it
-from here by tag.
+from here by tag. Since v3.0 it is a standalone desktop program (ADR 0001 in
+lenovo-b8000h-linux: device / shell / programs): GApplication id
+`io.github.trudenboy.Paint` (also `GLib.set_prgname` before GTK loads, the
+Wayland app id), no `b8k_ui`, dialogs from `b8k_compat.dialogs`; it meets the
+shell only through `data/<id>.desktop` (`X-B8K-Home`, `X-B8K-Replaces=paint`).
+The shell buzzes touches and its GTK theme sizes the header and dialogs. Don't
+edit the lenovo repo; tell its session the new tag.
 
 ## Running and installing
 
@@ -23,18 +29,16 @@ PyGObject, pycairo, Pillow; `pbn.py` also needs numpy and scipy (Alpine:
 `apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy`).
 
 ```
-./b8k-paint                 # run; single instance via flock on $XDG_RUNTIME_DIR/b8k-paint.lock
+PYTHONPATH=../b8k-compat ./b8k-paint   # run from the checkout (pictures/ and pbn.py beside it)
 ./b8k-paint --open ID       # go straight to one picture (e.g. builtin-fox, wd-Q123-4)
-sh install.sh [ROOT]        # install into / or another root (image build)
+sh install.sh [ROOT] [PREFIX]  # PREFIX /usr/local by default, /usr in the APKBUILD
 python3 make-paintings.py CACHE_DIR [SLUG...]  # regenerate pictures/*.svgz from Wikimedia Commons
 python3 pbn.py -v --level 3 IMAGE OUT.svgz     # one picture; levels 3/4/5 = ~300/600/1000 regions
 ```
 
-Built-in pictures are read only from the installed path
-`/usr/local/share/b8k/paint/` (`BUILTIN`), not from `./pictures/`; run
-`install.sh` (or point `BUILTIN` elsewhere temporarily) to see repo changes
-to pictures. `pbn.py` is found next to the program in a checkout, else at
-`/usr/local/lib/b8k-paint/pbn.py`.
+`BUILTIN` and `PBN` are found beside the program in a checkout
+(`pictures/`, `pbn.py`), else under the install prefix
+(`PREFIX/share/b8k-paint/`, `PREFIX/lib/b8k-paint/pbn.py`).
 
 The tablet (Lenovo B8000-H) is armv7, 1 GB RAM: `pbn.py` takes ~15 s for 300
 regions and ~20 s for 600 there, a full-screen redraw ~0.75 s. Commons
@@ -53,8 +57,8 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   `data-n` (colour number from 1, light to dark) and `data-label` "x y r"
   (where the number goes, inradius); root carries `data-palette`,
   `data-count`, `data-name`, `data-theme`, `data-level`, `data-source`.
-- `paint.conf`, `paint.svg` — the shell panel entry and icon (installed to
-  `/usr/local/share/b8k/apps.d/` and `/usr/local/share/b8k/`).
+- `data/` — `.desktop`, hicolor SVG icon, AppStream metainfo;
+  `packaging/alpine/APKBUILD`.
 
 ## Architecture notes
 
@@ -83,10 +87,6 @@ answers 429 when downloading many files; `make-paintings.py` retries.
 - **Photos and downloads** are converted by running `pbn.py` in a niced
   subprocess (keeps the GTK thread and the GIL free); photos cache to
   `~/.local/share/b8k-paint/photos/`, search previews to `.../work/`.
-- **Optional shell module**: `b8k_ui` is imported from
-  `/usr/local/share/b8k/python/` if present (vibration `Buzz`, `HEADER_CSS`,
-  `ask` dialog). Every use must keep a fallback so the program runs on any
-  GTK 3 desktop.
 - Regions are parsed lazily (`regions_of`); gallery thumbnails render on
   first draw and are cached as PNG; progress is written shortly after the
   last tap.

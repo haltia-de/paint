@@ -17,10 +17,9 @@ bottom has one big button per number. Pick a colour, tap its regions.
   fits the picture to the screen, the next one goes back to the same
   zoom and place), "where?" (puts the nearest unpainted region of the
   chosen colour in the middle, zoomed in until its number reads), undo,
-  and "look" (the finished picture while held). Drag to scroll.
-- Every button and every painting tap gives a short buzz, a wrong tap
-  does not (one emission hook on GtkButton "pressed" covers all
-  buttons, dialogs included); there is no timer, no score, no ads.
+  and "look" (the finished picture while held). A drag moves the
+  picture, which glides on when let go; a zoom takes a moment's glide.
+- A wrong tap gets a red outline; there is no timer, no score, no ads.
 - Progress is saved after every tap, so a picture can wait for tomorrow;
   the program starts on the last picture, unless it is finished, and the
   gallery opens at that picture's card. A finished picture shows
@@ -28,13 +27,19 @@ bottom has one big button per number. Pick a colour, tap its regions.
 
 Pictures are gzipped SVG made by pbn.py: one path per region, with its
 number and the point where the number goes. The gallery has paintings
-of about 300 and about 600 regions. To stay quick on the tablet, the
-picture is drawn in tiles at the current zoom and kept until the zoom
-changes; a tap redraws only the tiles of the region it painted, the
-chosen colour's highlight is drawn over the tiles, progress is written a
-moment after the last tap, and gallery thumbnails are kept as PNG files.
+of about 120, 300 and 600 regions, and a section of Japanese prints. To
+stay quick on a slow tablet (no GPU: a full redraw takes a second), the
+picture is drawn in tiles at the current zoom by a thread of its own and
+kept until the zoom changes; a drag only copies tiles, a zoom stretches
+what is there until the new tiles come, a tap paints its region into the
+tiles kept. Progress is written a moment after the last tap, and gallery
+thumbnails are kept as PNG files.
 
-Pictures: the built-in ones in /usr/local/share/b8k/paint/, and any photo
+It is a GTK application, io.github.trudenboy.Paint, for any desktop; on
+the b8k tablet shell the shell buzzes the touches and its GTK theme
+gives the large header and dialogs.
+
+Pictures: the built-in ones in PREFIX/share/b8k-paint/, and any photo
 put into ~/Раскраски (JPEG or PNG), which is turned into a picture of
 about 300 regions in the background the first time the gallery sees it.
 
@@ -54,7 +59,6 @@ made.
 """
 import collections
 import concurrent.futures
-import fcntl
 import gzip
 import hashlib
 import itertools
@@ -75,37 +79,36 @@ import xml.etree.ElementTree as ET
 
 import cairo
 import gi
+from gi.repository import GLib
+
+APP_ID = "io.github.trudenboy.Paint"
+# Under Wayland GTK 3 names the window by the program name: the program's
+# id, as its .desktop file is named, so a desktop or the b8k shell finds it.
+GLib.set_prgname(APP_ID)
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("GLibUnix", "2.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gdk, GdkPixbuf, GLib, GLibUnix, GObject, Gtk, Pango  # noqa: E402
+from b8k_compat import dialogs  # noqa: E402
+from gi.repository import Gdk, GdkPixbuf, Gio, GLibUnix, Gtk, Pango  # noqa: E402
 
-# The shell's shared pieces (haptics, header, panel badge, questions):
-# optional, so the program runs on any GTK desktop too.
-sys.path.insert(0, "/usr/local/share/b8k/python")
-try:
-    import b8k_ui
-except ImportError:
-    b8k_ui = None
-
-
-def buzzer():
-    """The vibration motor of the tablet, or nothing elsewhere."""
-    return b8k_ui.Buzz() if b8k_ui else (lambda *_args: True)
-
-
-BUILTIN = "/usr/local/share/b8k/paint"
+# Installed as PREFIX/bin/b8k-paint: the pictures are in
+# PREFIX/share/b8k-paint, the generator in PREFIX/lib/b8k-paint; in a
+# checkout both are beside the program.
+HERE = os.path.dirname(os.path.realpath(__file__))
+PREFIX = os.path.dirname(HERE)
+BUILTIN = next((d for d in (os.path.join(HERE, "pictures"),
+                            os.path.join(PREFIX, "share", "b8k-paint"))
+                if os.path.isdir(d)), os.path.join(PREFIX, "share", "b8k-paint"))
 PHOTOS = os.path.expanduser("~/Раскраски")
 DATA = os.path.expanduser("~/.local/share/b8k-paint")
 DOWNLOADED = os.path.join(DATA, "downloaded")
 # Pictures being made, for the search's preview.
 WORK = os.path.join(DATA, "work")
-# The generator: beside this program in a checkout, installed apart.
-PBN = next((p for p in (os.path.join(os.path.dirname(os.path.realpath(__file__)), "pbn.py"),
-                        "/usr/local/lib/b8k-paint/pbn.py") if os.path.exists(p)),
-           "/usr/local/lib/b8k-paint/pbn.py")
+PBN = next((p for p in (os.path.join(HERE, "pbn.py"),
+                        os.path.join(PREFIX, "lib", "b8k-paint", "pbn.py"))
+            if os.path.exists(p)), os.path.join(PREFIX, "lib", "b8k-paint", "pbn.py"))
 # Gallery sections, easier further up: a level, or a theme that has a
 # section of its own (its pictures then show there, whatever the level).
 SECTIONS = (
@@ -1293,7 +1296,7 @@ class Board(Gtk.DrawingArea):
             near = self.near(x, y, FINGER / self.scale)
             if near is None:
                 if i is not None and i not in self.filled:
-                    # No buzz here: the red outline alone says "not this one".
+                    # The red outline says "not this one".
                     self.wrong = i
                     self.redraw(i)
                     GLib.timeout_add(400, self.clear_wrong, i)
@@ -1302,7 +1305,6 @@ class Board(Gtk.DrawingArea):
         self.filled.add(i)
         self.counts[self.chosen] -= 1
         self.undo.append(i)
-        self.app.buzz()
         self.paint_over(i)
         self.save_soon()
         self.app.region_painted(self.chosen)
@@ -1335,14 +1337,9 @@ class Board(Gtk.DrawingArea):
 
 # --- the program ------------------------------------------------------------
 class Paint:
-    def __init__(self, open_id=None):
-        self.buzz = buzzer()
-        # Every button buzzes as it goes down, the way the panel does. The
-        # signal exists only once the class is set up, hence the throwaway
-        # button.
-        Gtk.Button()
-        GObject.add_emission_hook(Gtk.Button, "pressed", self.on_button)
-        self.win = Gtk.Window(title="Раскраска")
+    def __init__(self, app, open_id=None):
+        self.app = app
+        self.win = Gtk.ApplicationWindow(application=app, title="Раскраска")
         self.win.set_default_size(1160, 800)
         # The same header as Погода, Новости and MAX: the title in the
         # middle, "←" on the left while a picture is open.
@@ -1393,10 +1390,6 @@ class Paint:
         else:
             self.show_gallery()
         self.win.show_all()
-
-    def on_button(self, *_args):
-        self.buzz()
-        return True  # keep the hook
 
     # gallery
     def show_gallery(self):
@@ -1582,17 +1575,8 @@ class Paint:
         self.show_gallery()
 
     def confirm(self, question, yes):
-        """A yes/no question in the shell's own style (b8k-ask's fuzzel),
-        or a GTK one elsewhere; True when the first answer is chosen."""
-        answer = b8k_ui.ask(question, yes) if b8k_ui else None
-        if answer is not None:
-            return answer
-        dialog = Gtk.MessageDialog(transient_for=self.win, modal=True,
-                                   message_type=Gtk.MessageType.QUESTION, text=question)
-        dialog.add_buttons("Отмена", Gtk.ResponseType.CANCEL, yes, Gtk.ResponseType.OK)
-        ok = dialog.run() == Gtk.ResponseType.OK
-        dialog.destroy()
-        return ok
+        """A yes/no question in the window; Отмена is the default."""
+        return dialogs.ask(self.win, question, yes)
 
     # new pictures
     def show_search(self):
@@ -1921,7 +1905,6 @@ class Paint:
 
     def flip_preview(self):
         if self.preview_item and self.grade[0] in self.preview_item["pics"]:
-            self.buzz()
             self.show_original = not self.show_original
             self.choose_grade(self.grade)
         return False
@@ -2191,12 +2174,7 @@ class Paint:
         self.board.show_finished()
         while Gtk.events_pending():
             Gtk.main_iteration()
-        dialog = Gtk.MessageDialog(transient_for=self.win, modal=True,
-                                   message_type=Gtk.MessageType.INFO,
-                                   buttons=Gtk.ButtonsType.OK, text="Готово!")
-        dialog.format_secondary_text("Картинка раскрашена.")
-        dialog.run()
-        dialog.destroy()
+        dialogs.info(self.win, "Готово! Картинка раскрашена.")
         # It stays on the screen to look at; "←" goes to the gallery.
 
     def back(self):
@@ -2215,27 +2193,34 @@ class Paint:
 
     def quit(self, *_args):
         self.save()
-        Gtk.main_quit()
+        self.app.quit()
         return False
 
 
+class App(Gtk.Application):
+    """One window: starting the program again shows the one there is."""
+
+    def __init__(self, open_id=None):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
+        self.open_id = open_id
+        self.paint = None
+
+    def do_activate(self):
+        if self.paint:
+            self.paint.win.present()
+            return
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        os.makedirs(PHOTOS, exist_ok=True)
+        self.paint = Paint(self, self.open_id)
+
+
 def main():
-    run = os.environ.get("XDG_RUNTIME_DIR") or os.path.expanduser("~/.cache")
-    lock = open(os.path.join(run, "b8k-paint.lock"), "a")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        return 0
-    provider = Gtk.CssProvider()
-    provider.load_from_data((b8k_ui.HEADER_CSS if b8k_ui else b"") + CSS)
-    Gtk.StyleContext.add_provider_for_screen(
-        Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-    os.makedirs(PHOTOS, exist_ok=True)
     # --open ID goes straight to one picture (for testing).
     open_id = sys.argv[2] if sys.argv[1:2] == ["--open"] and len(sys.argv) > 2 else None
-    Paint(open_id)
-    Gtk.main()
-    return 0
+    return App(open_id).run(sys.argv[:1])
 
 
 if __name__ == "__main__":

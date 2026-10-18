@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Colouring
+Name[ru]=Раскраска
+Comment=Colour by number on paintings and prints
+Comment[ru]=Раскраска по номерам на известных картинах
+Exec=b8k-paint
+Icon=io.github.trudenboy.Paint
+Terminal=false
+Categories=GTK;Game;LogicGame;
+Keywords=colouring;coloring;paint by number;раскраска;картины;по номерам;
+StartupNotify=true
+X-B8K-Home=true
+X-B8K-Replaces=paint
