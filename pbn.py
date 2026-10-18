@@ -31,7 +31,7 @@ import time
 from xml.sax.saxutils import quoteattr
 
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps
 from scipy import ndimage
 from scipy.cluster.vq import kmeans2, vq
 
@@ -60,11 +60,21 @@ def lab(rgb):
                      200 * (f[:, 1] - f[:, 2])), -1)
 
 
-def reduce(img, side, colours, detail=5):
-    """The picture shrunk to side along its long edge and reduced to at
-    most colours: (index array, palette as a list of (r, g, b)). Speckles
-    smaller than detail pixels join what surrounds them."""
+def reduce(img, side, colours, detail=5, crop=None):
+    """The picture (cut to crop, fractions x0 y0 x1 y1, if given) shrunk
+    to side along its long edge and reduced to at most colours: (index
+    array, palette as a list of (r, g, b)). Speckles smaller than detail
+    pixels join what surrounds them."""
     img = ImageOps.exif_transpose(img).convert("RGB")
+    if crop:
+        w, h = img.size
+        img = img.crop((round(crop[0] * w), round(crop[1] * h),
+                        round(crop[2] * w), round(crop[3] * h)))
+    # An even margin (the paper round a drawing) is not part of it.
+    corner = Image.new("RGB", img.size, img.getpixel((0, 0)))
+    box = ImageChops.difference(img, corner).convert("L").point(lambda v: v > 24 and 255).getbbox()
+    if box and (box[2] - box[0]) * (box[3] - box[1]) > 0.3 * img.size[0] * img.size[1]:
+        img = img.crop(box)
     # Old varnish makes paintings brown and dull; a little brighter and
     # more saturated, more makes skies violet.
     img = ImageOps.autocontrast(img, cutoff=0.5, preserve_tone=True)
@@ -349,8 +359,8 @@ def rings(chains, n):
     return out
 
 
-def picture(img, regions=300, colours=18, side=SIDE, detail=5, min_area=None, min_radius=2.5,
-            tolerance=0.25, timing=None):
+def picture(img, regions=300, colours=18, side=SIDE, detail=5, crop=None,
+            min_area=None, min_radius=2.5, tolerance=0.25, timing=None):
     """The region picture of a PIL image as a dict: w, h, palette, and
     regions [(colour number from 0, label (x, y, r), rings)]."""
     t = [time.monotonic()]
@@ -360,7 +370,7 @@ def picture(img, regions=300, colours=18, side=SIDE, detail=5, min_area=None, mi
         if timing is not None:
             timing.append((name, t[-1] - t[-2]))
 
-    idx, keep = reduce(img, side, colours, detail)
+    idx, keep = reduce(img, side, colours, detail, crop)
     lap("reduce")
     labels, colour_of = components(idx, len(keep))
     lap("components %d" % len(colour_of))
@@ -425,6 +435,8 @@ def main():
     args.add_argument("out", help="the .svgz to write")
     args.add_argument("--level", type=int, choices=sorted(LEVELS), default=3)
     args.add_argument("--side", type=int, default=SIDE)
+    args.add_argument("--crop", type=float, nargs=4, metavar=("X0", "Y0", "X1", "Y1"),
+                      help="the part of the image to use, as fractions")
     args.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                       help="a data- attribute of the picture, such as name=...")
     args.add_argument("-v", "--verbose", action="store_true")
@@ -432,7 +444,8 @@ def main():
     regions, colours, detail = LEVELS[opts.level]
     timing = []
     start = time.monotonic()
-    pic = picture(Image.open(opts.image), regions, colours, opts.side, detail, timing=timing)
+    pic = picture(Image.open(opts.image), regions, colours, opts.side, detail, opts.crop,
+                  timing=timing)
     write(pic, opts.out, dict(kv.split("=", 1) for kv in opts.set))
     if opts.verbose:
         for name, sec in timing:
