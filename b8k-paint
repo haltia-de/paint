@@ -117,7 +117,7 @@ SECTIONS = (
     (5, "Самые мелкие области"),
     (9, "Мои фотографии"),
 )
-THEMES = ("Природа", "Северная природа", "Флот", "Военный флот", "Животные")
+THEMES = ("Природа", "Северная природа", "Флот", "Военный флот", "Животные", "Цветы", "Дома")
 # Zoom in screen pixels per picture unit (a picture is 1000 units along
 # its long side): the whole picture on screen, then up by ZOOM_STEP to
 # MAX_ZOOM.
