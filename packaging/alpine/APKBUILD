@@ -1,6 +1,6 @@
 # Maintainer: Mikhail Nevskiy <rensomail@gmail.com>
 pkgname=b8k-paint
-pkgver=3.0.1
+pkgver=3.1.0
 pkgrel=0
 pkgdesc="Раскраска: Colour by number on paintings and prints (GTK 3)"
 url="https://github.com/trudenboy/b8k-paint"

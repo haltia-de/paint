@@ -23,7 +23,8 @@ bottom has one big button per number. Pick a colour, tap its regions.
 - Progress is saved after every tap, so a picture can wait for tomorrow;
   the program starts on the last picture, unless it is finished, and the
   gallery opens at that picture's card. A finished picture shows
-  without its outlines and numbers.
+  without its outlines and numbers, and "Сохранить в галерею" keeps it
+  as a PNG in Изображения/Мои раскраски, where Галерея shows it.
 
 Pictures are gzipped SVG made by pbn.py: one path per region, with its
 number and the point where the number goes. The gallery has paintings
@@ -43,7 +44,14 @@ Pictures: the built-in ones in PREFIX/share/b8k-paint/, and any photo
 put into ~/Раскраски (JPEG or PNG), which is turned into a picture of
 about 300 regions in the background the first time the gallery sees it.
 
-New pictures: "+ Найти" in the gallery header searches Wikidata for
+The gallery is built once and kept: closing a picture redraws only its
+card; the first screenful shows at once and the other cards come while
+it is already in use, their thumbnails drawn in a thread.
+
+New pictures: "+ Добавить" in the gallery header offers a picture from
+the tablet's own (the pictures, downloads and camera folders and memory
+cards, newest first, as Галерея finds them) or a search: it searches
+Wikidata for
 paintings (items that are an instance of painting and have an image), by
 artist, title or what is painted, in Russian as well; the pictures
 themselves come from Wikimedia Commons, where every file is under a free
@@ -58,7 +66,6 @@ wikidata.org, commons.wikimedia.org and the Wikimedia image hosts are
 made.
 """
 import collections
-import concurrent.futures
 import gzip
 import hashlib
 import itertools
@@ -73,8 +80,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.parse
-import urllib.request
 import xml.etree.ElementTree as ET
 
 import cairo
@@ -85,6 +90,8 @@ APP_ID = "io.github.trudenboy.Paint"
 # Under Wayland GTK 3 names the window by the program name: the program's
 # id, as its .desktop file is named, so a desktop or the b8k shell finds it.
 GLib.set_prgname(APP_ID)
+# What a window without a title of its own (a dialog) is called.
+GLib.set_application_name("Раскраска")
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
@@ -309,18 +316,55 @@ def make_picture(source, out, level, meta):
     return True
 
 
+# What the gallery needs of each picture file, kept by path with its size
+# and time (reading the head of a hundred gzipped files took 0.7 s).
+_HEADS = None
+
+
+def heads(save=False):
+    """The kept heads; with save, write them out if they changed."""
+    global _HEADS
+    path = os.path.join(DATA, "heads.json")
+    if _HEADS is None:
+        try:
+            with open(path) as fh:
+                _HEADS = json.load(fh)
+        except (OSError, ValueError):
+            _HEADS = {}
+        _HEADS[""] = False  # changed
+    if save and _HEADS.get(""):
+        _HEADS[""] = False
+        try:
+            os.makedirs(DATA, exist_ok=True)
+            with open(path + ".new", "w") as fh:
+                json.dump(_HEADS, fh, ensure_ascii=False)
+            os.replace(path + ".new", path)
+        except OSError:
+            pass
+    return _HEADS
+
+
 def picture_at(path, pic_id):
     """A picture file's description, read without its regions; None when
     it cannot be read."""
     try:
-        with gzip.open(path) as fh:
-            head = dict(next(ET.iterparse(fh, events=("start",)))[1].attrib)
+        st = os.stat(path)
+        stamp = [st.st_mtime, st.st_size]
+        kept = heads().get(path)
+        if kept and kept[0] == stamp:
+            head = kept[1]
+        else:
+            with gzip.open(path) as fh:
+                head = dict(next(ET.iterparse(fh, events=("start",)))[1].attrib)
+            head.pop("data-source", None)
+            heads()[path] = [stamp, head]
+            heads()[""] = True
         return {"id": pic_id, "path": path,
                 "name": head.get("data-name") or os.path.splitext(os.path.basename(path))[0],
                 "theme": head.get("data-theme", ""), "level": int(head.get("data-level", 9)),
                 "w": float(head["width"]), "h": float(head["height"]),
                 "palette": head["data-palette"].split(), "count": int(head["data-count"]),
-                "mtime": os.path.getmtime(path)}
+                "mtime": st.st_mtime}
     except (OSError, ET.ParseError, StopIteration, KeyError, ValueError):
         return None
 
@@ -375,6 +419,8 @@ def regions_in(pic, x0, y0, x1, y1):
 
 def api(url, params):
     params = dict(params, format="json", formatversion="2")
+    import urllib.parse  # only for searching: a fifth of a second at start
+    import urllib.request
     req = urllib.request.Request(url + "?" + urllib.parse.urlencode(params),
                                  headers={"User-Agent": AGENT})
     with urllib.request.urlopen(req, timeout=20) as fh:
@@ -383,6 +429,9 @@ def api(url, params):
 
 def fetch_image(url):
     """Image bytes, only over https from the Wikimedia image hosts."""
+    import urllib.parse
+    import urllib.request
+
     def allowed(u):
         parts = urllib.parse.urlsplit(u)
         return parts.scheme == "https" and parts.hostname in IMAGE_HOSTS
@@ -545,6 +594,7 @@ def load_pictures():
                 if pic:
                     pic["level"] = 8
                     found.append(pic)
+    heads(save=True)
     return found, waiting
 
 
@@ -1335,6 +1385,58 @@ class Board(Gtk.DrawingArea):
         self.app.region_painted(number)
 
 
+def find_photos(limit=400):
+    """Photos and pictures on the tablet, newest first: the pictures,
+    downloads and camera folders and the memory cards, as Галерея finds
+    them (not this program's own files)."""
+    home = os.path.expanduser("~")
+    roots = [GLib.get_user_special_dir(d) for d in (GLib.UserDirectory.DIRECTORY_PICTURES,
+                                                     GLib.UserDirectory.DIRECTORY_DOWNLOAD,
+                                                     GLib.UserDirectory.DIRECTORY_DOCUMENTS)]
+    roots += [os.path.join(home, d) for d in ("DCIM", "Camera", "Pictures", "Downloads")]
+    roots += [os.path.join(base, d) for base in ("/media", "/run/media/" + os.environ.get("USER", ""))
+              if os.path.isdir(base) for d in os.listdir(base)]
+    found, seen = [], set()
+    for root in roots:
+        if not root or not os.path.isdir(root) or os.path.realpath(root) in seen:
+            continue
+        seen.add(os.path.realpath(root))
+        depth = root.rstrip("/").count("/")
+        for top, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if not d.startswith(".")
+                       and top.count("/") - depth < 4]
+            for f in files:
+                if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                    path = os.path.join(top, f)
+                    try:
+                        found.append((os.path.getmtime(path), path))
+                    except OSError:
+                        pass
+    found.sort(reverse=True)
+    return [p for _t, p in found[:limit]]
+
+
+class Workers:
+    """A few threads taking jobs in turn (concurrent.futures took a third
+    of a second to import on the tablet)."""
+
+    def __init__(self, count):
+        self.jobs = queue.Queue()
+        for _ in range(count):
+            threading.Thread(target=self.work, daemon=True).start()
+
+    def submit(self, fn, *args):
+        self.jobs.put((fn, args))
+
+    def work(self):
+        while True:
+            fn, args = self.jobs.get()
+            try:
+                fn(*args)
+            except Exception as exc:  # one job must not stop the thread
+                sys.stderr.write("b8k-paint: %s\n" % exc)
+
+
 # --- the program ------------------------------------------------------------
 class Paint:
     def __init__(self, app, open_id=None):
@@ -1355,9 +1457,9 @@ class Paint:
         self.back_button.connect("clicked", lambda _b: self.back())
         self.back_button.set_no_show_all(True)
         header.pack_start(self.back_button)
-        self.find_button = Gtk.Button(label="+ Найти")
+        self.find_button = Gtk.Button(label="+ Добавить")
         self.find_button.get_style_context().add_class("back")
-        self.find_button.connect("clicked", lambda _b: self.show_search())
+        self.find_button.connect("clicked", lambda _b: self.add_picture())
         self.find_button.set_no_show_all(True)
         header.pack_end(self.find_button)
         self.win.set_titlebar(header)
@@ -1371,16 +1473,23 @@ class Paint:
         self.search_page = None
         self.search_gen = 0
         self.preview_item = None
-        self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+        self.pool = Workers(3)
         # Photos being made into pictures, one at a time.
         self.photo_jobs = set()
-        self.photo_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        self.photo_pool = Workers(1)
+        # Gallery thumbnails not kept yet are drawn here, one at a time.
+        self.thumb_pool = Workers(1)
+        self.thumbs = {}  # picture id -> its thumbnail surface
+        self.gallery = None  # kept between visits; built again when stale
+        self.gallery_stale = False
+        self.cards = {}  # picture id -> (the card's box, the picture)
         shutil.rmtree(WORK, ignore_errors=True)
         # An unfinished picture opens straight away; the gallery is built
         # only when it is needed (back() builds it afresh anyway). Building
         # both cost a second before the window first showed.
         open_id = open_id or read_last()
-        pic = next((p for p in load_pictures()[0] if p["id"] == open_id), None)
+        self.pictures = load_pictures()
+        pic = next((p for p in self.pictures[0] if p["id"] == open_id), None)
         if pic:
             done, total = share_done(pic, load_progress(pic))
             if done >= total:
@@ -1392,22 +1501,30 @@ class Paint:
         self.win.show_all()
 
     # gallery
-    def show_gallery(self):
-        self.cards = {}
-        old = self.stack.get_child_by_name("gallery")
-        if old:
-            self.stack.remove(old)
+    def show_gallery(self, rebuild=False, changed=None):
+        """The gallery: built once and kept; a picture closed (changed)
+        gets its card again. rebuild: pictures came or went."""
         self.title.set_text("Раскраски")
         self.back_button.hide()
         self.find_button.show()
+        if self.gallery and not rebuild:
+            if changed in self.cards:
+                self.fill_card(*self.cards[changed])
+            self.stack.set_visible_child_name("gallery")
+            self.win.set_focus(None)
+            return
+        if self.gallery:
+            self.stack.remove(self.gallery)
+        self.cards = {}
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-
         # One section per level, easier at the top.
         sections = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        pictures, waiting = load_pictures()
+        pictures, waiting = self.pictures if self.pictures else load_pictures()
+        self.pictures = None
         for path in waiting:
             self.make_photo(path)
         own = {key for key, _heading in SECTIONS if isinstance(key, str)}
+        todo = []
         for key, heading in SECTIONS:
             # By level and theme; downloaded ones newest first.
             pics = sorted((p for p in pictures
@@ -1432,9 +1549,8 @@ class Paint:
             flow.set_margin_start(16)
             flow.set_margin_end(16)
             flow.set_margin_bottom(8)
-            for pic in pics:
-                flow.add(self.card(pic))
             sections.pack_start(flow, False, False, 0)
+            todo += [(flow, pic) for pic in pics]
         if waiting:
             note = Gtk.Label(label="Готовлю раскраски из фотографий: %d. Это займёт "
                                    "около полуминуты на каждую." % len(waiting), xalign=0)
@@ -1450,12 +1566,30 @@ class Paint:
         scroll.add(sections)
         box.pack_start(scroll, True, True, 0)
         box.show_all()
+        self.gallery = box
         self.stack.add_named(box, "gallery")
         self.stack.set_visible_child_name("gallery")
-        # GTK scrolls to whichever card takes the focus; show the last
-        # picture's card instead, or the top.
         self.win.set_focus(None)
-        GLib.timeout_add(150, self.scroll_to_last, scroll, sections)
+        # The first screenful at once, the rest a few cards at a time while
+        # the gallery already shows (a hundred cards took a second).
+        last = read_last()
+        first = next((k for k, (_f, p) in enumerate(todo) if p["id"] == last), 0)
+        self.add_cards(todo, 0, max(9, first + 9), scroll, sections)
+
+    def add_cards(self, todo, start, upto, scroll, sections):
+        for flow, pic in todo[start:upto]:
+            slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            self.fill_card(slot, pic)
+            flow.add(slot)
+            slot.get_parent().show_all()
+        if start == 0:
+            # GTK scrolls to whichever card takes the focus; show the last
+            # picture's card instead, or the top.
+            GLib.timeout_add(150, self.scroll_to_last, scroll, sections)
+        if upto < len(todo):
+            GLib.idle_add(self.add_cards, todo, upto, upto + 6, scroll, sections,
+                          priority=GLib.PRIORITY_LOW)
+        return False
 
     def scroll_to_last(self, scroll, sections):
         y = 0
@@ -1490,24 +1624,40 @@ class Paint:
     def photo_ready(self, path):
         self.photo_jobs.discard(path)
         if self.stack.get_visible_child_name() == "gallery":
-            self.show_gallery()
+            self.show_gallery(rebuild=True)
+        else:
+            self.gallery_stale = True
         return False
 
-    def card(self, pic):
+    def fill_card(self, slot, pic):
+        """A picture's card in slot (made again when its progress changed):
+        its thumbnail, name, theme, how far it is, and the buttons to start
+        again or take it out."""
+        for child in slot.get_children():
+            slot.remove(child)
+        self.cards[pic["id"]] = (slot, pic)
         filled = load_progress(pic)
         done, total = share_done(pic, filled)
         thumb = Gtk.DrawingArea()
         tw, th = 320, 220
         thumb.set_size_request(tw, th)
-        image = []
+        self.thumbs.pop(pic["id"], None)
+        asked = []
 
-        def draw(_w, cr):
-            # Made when the card first shows: most are kept as PNG, a new
-            # one takes a moment.
-            if not image:
-                image.append(thumbnail(pic, filled, done == total))
-            cr.set_source_surface(image[0], (tw - image[0].get_width()) // 2,
-                                  (th - image[0].get_height()) // 2)
+        def draw(widget, cr):
+            image = self.thumbs.get(pic["id"])
+            if image is None:
+                # Kept as PNG most of the time; else drawn in a thread
+                # while a pale square stands in.
+                cr.set_source_rgb(0.93, 0.93, 0.92)
+                cr.rectangle(30, 10, tw - 60, th - 20)
+                cr.fill()
+                if not asked:
+                    asked.append(True)
+                    self.thumb_pool.submit(self.make_thumb, pic, filled, done == total, widget)
+                return False
+            cr.set_source_surface(image, (tw - image.get_width()) // 2,
+                                  (th - image.get_height()) // 2)
             cr.paint()
             return False
 
@@ -1531,24 +1681,34 @@ class Paint:
         button.get_style_context().add_class("card")
         button.add(inner)
         button.connect("clicked", lambda _b: self.open(pic))
-        self.cards[pic["id"]] = button
-        downloaded = pic["id"].startswith("wd-")
-        if not done and not downloaded:
-            return button
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.pack_start(button, True, True, 0)
+        slot.pack_start(button, True, True, 0)
         if done:
             # A started or finished picture can be wiped and begun again.
             reset = Gtk.Button(label="↺  Начать заново")
             reset.get_style_context().add_class("reset")
             reset.connect("clicked", lambda _b: self.reset(pic))
-            box.pack_start(reset, False, False, 0)
-        if downloaded:
+            slot.pack_start(reset, False, False, 0)
+        if pic["id"].startswith("wd-"):
             remove = Gtk.Button(label="✕  Убрать")
             remove.get_style_context().add_class("reset")
             remove.connect("clicked", lambda _b: self.remove(pic))
-            box.pack_start(remove, False, False, 0)
-        return box
+            slot.pack_start(remove, False, False, 0)
+        slot.show_all()
+
+    def make_thumb(self, pic, filled, finished, widget):
+        """In the thumbnail thread: the thumbnail, then shown."""
+        try:
+            image = thumbnail(pic, filled, finished)
+        except Exception as exc:  # a broken file must not stop the thread
+            sys.stderr.write("b8k-paint: %s: %s\n" % (pic["id"], exc))
+            return
+
+        def show():
+            self.thumbs[pic["id"]] = image
+            widget.queue_draw()
+            return False
+
+        GLib.idle_add(show)
 
     def remove(self, pic):
         """Take a downloaded picture out of the gallery, with its progress."""
@@ -1560,7 +1720,7 @@ class Paint:
                 os.remove(path)
             except OSError:
                 pass
-        self.show_gallery()
+        self.show_gallery(rebuild=True)
 
     def reset(self, pic):
         if not self.confirm("Стереть раскраску «%s»\nи начать заново?" % pic["name"], "Стереть"):
@@ -1570,15 +1730,95 @@ class Paint:
                 os.remove(path)
             except OSError:
                 pass
-        # The gallery comes back at this picture's card.
         write_last(pic["id"])
-        self.show_gallery()
+        self.show_gallery(changed=pic["id"])
 
     def confirm(self, question, yes):
         """A yes/no question in the window; Отмена is the default."""
         return dialogs.ask(self.win, question, yes)
 
     # new pictures
+    def add_picture(self):
+        """A painting found on Wikidata, or a picture of one's own from the
+        gallery."""
+        choice = dialogs.choose(self.win, "Добавить картинку",
+                                ["Найти картину в интернете", "Взять из галереи"])
+        if choice == 0:
+            self.show_search()
+        elif choice == 1:
+            self.show_photos()
+
+    def show_photos(self):
+        """The pictures on the tablet, newest first, as in Галерея; a tap
+        shows one as it will be painted."""
+        self.preview_item = None
+        old = self.stack.get_child_by_name("preview")
+        if old:
+            self.stack.remove(old)
+        self.title.set_text("Из галереи")
+        self.back_button.show()
+        self.find_button.hide()
+        if self.stack.get_child_by_name("photos") is None:
+            from b8k_compat import photos  # its thumbnails: only now
+            self.photo_thumbs = photos.Thumbs()
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+            for side in ("start", "end", "top"):
+                getattr(box, "set_margin_" + side)(16)
+            self.photos_note = Gtk.Label(label="Ищу фотографии…", xalign=0)
+            self.photos_note.get_style_context().add_class("note")
+            box.pack_start(self.photos_note, False, False, 0)
+            self.photo_grid = Gtk.FlowBox()
+            self.photo_grid.set_selection_mode(Gtk.SelectionMode.NONE)
+            self.photo_grid.set_homogeneous(True)
+            self.photo_grid.set_min_children_per_line(4)
+            self.photo_grid.set_max_children_per_line(4)
+            self.photo_grid.set_row_spacing(12)
+            self.photo_grid.set_column_spacing(12)
+            self.photo_grid.set_valign(Gtk.Align.START)
+            scroll = Gtk.ScrolledWindow()
+            scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            scroll.set_kinetic_scrolling(True)
+            scroll.add(self.photo_grid)
+            box.pack_start(scroll, True, True, 0)
+            box.show_all()
+            self.stack.add_named(box, "photos")
+            threading.Thread(target=lambda: GLib.idle_add(self.photos_found, find_photos()),
+                             daemon=True).start()
+        self.stack.set_visible_child_name("photos")
+
+    def photos_found(self, paths):
+        self.photos_note.set_text("Нажмите на фотографию или картинку" if paths
+                                  else "В галерее нет фотографий")
+        for path in paths:
+            image = Gtk.Image()
+            image.set_size_request(220, 220)
+            self.photo_thumbs.want(path, image, 220)
+            button = Gtk.Button()
+            button.get_style_context().add_class("card")
+            button.add(image)
+            button.connect("clicked", lambda _b, p=path: self.photo_chosen(p))
+            self.photo_grid.add(button)
+        self.photo_grid.show_all()
+        return False
+
+    def photo_chosen(self, path):
+        try:
+            if os.path.getsize(path) > 40_000_000:
+                raise OSError("too large")
+            with open(path, "rb") as fh:
+                data = fh.read()
+            large = pixbuf_of(data, 640, 520)
+        except (OSError, GLib.Error) as exc:
+            sys.stderr.write("b8k-paint: %s: %s\n" % (path, exc))
+            dialogs.info(self.win, "Эту картинку не открыть.")
+            return
+        st = os.stat(path)
+        key = hashlib.sha1(("%s|%d|%d" % (path, st.st_size, st.st_mtime)).encode()).hexdigest()
+        self.show_preview({"qid": "own-" + key[:12],
+                           "title": os.path.splitext(os.path.basename(path))[0],
+                           "author": "", "year": None, "file": path, "data": data,
+                           "large": large, "own": True})
+
     def show_search(self):
         """The search page; it keeps its results while a painting is viewed."""
         if self.search_page is None:
@@ -1961,9 +2201,11 @@ class Paint:
                 sys.stderr.write("b8k-paint: %s: %s\n" % (path, exc))
                 self.preview_note.set_text("Не удалось сохранить")
                 return
+            self.gallery_stale = True
             self.choose_grade(self.grade)
             self.preview_note.set_text("Готово, картина в раскрасках")
-            item["info"].set_text("✓ уже в раскрасках")
+            if "info" in item:
+                item["info"].set_text("✓ уже в раскрасках")
             return
         pic = next((p for p in load_pictures()[0] if p["id"] == pic_id), None)
         if pic:
@@ -1980,6 +2222,9 @@ class Paint:
             self.stack.remove(old)
         if self.board:
             self.board.stop()
+        # A copy: the gallery's thread may read and drop this picture's
+        # regions for a thumbnail meanwhile.
+        pic = {k: v for k, v in pic.items() if k not in ("regions", "grid")}
         self.board = Board(self, pic)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         middle = Gtk.Box()
@@ -2174,18 +2419,56 @@ class Paint:
         self.board.show_finished()
         while Gtk.events_pending():
             Gtk.main_iteration()
-        dialogs.info(self.win, "Готово! Картинка раскрашена.")
+        if dialogs.ask(self.win, "Готово! Картинка раскрашена.", "Сохранить в галерею",
+                       "Закрыть"):
+            self.save_to_gallery(self.board.pic)
         # It stays on the screen to look at; "←" goes to the gallery.
+
+    def save_to_gallery(self, pic):
+        """The finished picture as a PNG among the pictures (Галерея shows
+        it), drawn in a thread: a large one takes a few seconds."""
+        folder = os.path.join(GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES)
+                              or os.path.expanduser("~/Pictures"), "Мои раскраски")
+        name = re.sub(r'[/\\:*?"<>|]', " ", pic["name"]).strip() or "Раскраска"
+
+        def work():
+            try:
+                os.makedirs(folder, exist_ok=True)
+                path = os.path.join(folder, name + ".png")
+                n = 2
+                while os.path.exists(path):
+                    path = os.path.join(folder, "%s %d.png" % (name, n))
+                    n += 1
+                own = {k: v for k, v in pic.items() if k not in ("regions", "grid")}
+                full = [hex_rgb(c) for c in own["palette"]]
+                regs = regions_of(own)
+                image = whole_picture(own, 2000, 2000, lambda i: full[regs[i].n])
+                image.write_to_png(path + ".new")
+                os.replace(path + ".new", path)
+                text = "Сохранено в галерею:\n%s" % os.path.join(os.path.basename(folder),
+                                                                 os.path.basename(path))
+            except (OSError, cairo.Error) as exc:
+                sys.stderr.write("b8k-paint: %s: %s\n" % (folder, exc))
+                text = "Не удалось сохранить."
+            GLib.idle_add(lambda: dialogs.info(self.win, text) and False)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def back(self):
         if self.stack.get_visible_child_name() == "preview":
-            self.show_search()
+            if self.preview_item and self.preview_item.get("own"):
+                self.show_photos()
+            else:
+                self.show_search()
             return
         self.save()
+        changed = None
         if self.board:
             self.board.stop()
+            changed = self.board.pic["id"]
         self.board = None
-        self.show_gallery()
+        stale, self.gallery_stale = self.gallery_stale, False
+        self.show_gallery(rebuild=stale, changed=changed)
 
     def save(self):
         if self.board:

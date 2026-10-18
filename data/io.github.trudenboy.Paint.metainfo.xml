@@ -17,6 +17,7 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
+    <release version="3.1.0" date="2026-10-18"/>
     <release version="3.0.1" date="2026-10-18"/>
     <release version="3.0" date="2026-10-18"/>
   </releases>
