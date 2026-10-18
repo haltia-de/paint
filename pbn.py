@@ -39,7 +39,7 @@ from scipy.cluster.vq import kmeans2, vq
 SIDE = 1000
 # Levels: at most so many regions, of at most so many colours; speckles
 # below the detail size (pixels) join what surrounds them.
-LEVELS = {3: (300, 18, 5), 4: (600, 24, 3), 5: (1000, 28, 3)}
+LEVELS = {2: (120, 14, 5), 3: (300, 18, 5), 4: (600, 24, 3), 5: (1000, 28, 3)}
 
 
 # sRGB 0..255 to linear light, as a table: the power for each pixel is

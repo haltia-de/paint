@@ -4,11 +4,13 @@
 
   make-paintings.py CACHE_DIR [SLUG...]
 
-downloads each painting from Wikimedia Commons (1200 px wide) into
-CACHE_DIR, then writes pictures/<slug>.svgz with pbn.py: level 3 of
-about 300 regions, level 4 of about 600 (see LEVELS there). All works
+downloads each painting from Wikimedia Commons (1200 px wide), or each
+drawing from OpenClipart, into CACHE_DIR, then writes
+pictures/<slug>.svgz with pbn.py: level 2 of about 120 regions, 3 of
+about 300, 4 of about 600 (see LEVELS there). The paintings and prints
 are by artists who died more than 70 years ago, so they are in the
-public domain; PAINTINGS names each Commons file. Needs numpy and scipy.
+public domain; OpenClipart drawings are CC0. PAINTINGS names each source.
+Needs numpy and scipy, and cairosvg for the drawings.
 """
 import os
 import sys
@@ -25,7 +27,9 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pictures")
 # Wikimedia asks for a User-Agent that says who is asking.
 AGENT = "b8k-paint/1.0 (https://github.com/trudenboy/lenovo-b8000h-linux)"
 
-# slug, Commons file, name, theme, level
+# slug, source, name, theme, level, and optionally the part to use (x0,
+# y0, x1, y1 as fractions: no text, no book margins). The source is a
+# Commons file, or "openclipart:ID" for an OpenClipart drawing (CC0).
 PAINTINGS = [
     ("golden-autumn", "Levitan Zolotaya Osen.jpg", "Золотая осень", "Природа", 4),
     ("rye", "Ivan Shishkin - Рожь - Google Art Project.jpg", "Рожь", "Природа", 4),
@@ -86,11 +90,22 @@ PAINTINGS = [
 ]
 # The level of a painting above, as made now: the 128-cell paintings of
 # the grid days are 600-region ones too.
-LEVEL = {3: 3, 4: 4, 5: 4}
+LEVEL = {2: 2, 3: 3, 4: 4, 5: 4}
 
 
 def fetch(cache, name):
-    path = os.path.join(cache, name.replace("/", "_"))
+    path = os.path.join(cache, name.replace("/", "_").replace(":", "-"))
+    if name.startswith("openclipart:"):
+        # A drawing: its SVG, drawn on white at the size the pictures use.
+        if not os.path.exists(path + ".png"):
+            import cairosvg
+            req = urllib.request.Request("https://openclipart.org/download/" + name[12:],
+                                         headers={"User-Agent": AGENT})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                svg = r.read()
+            cairosvg.svg2png(bytestring=svg, write_to=path + ".png",
+                             output_width=pbn.SIDE, background_color="white")
+        return path + ".png"
     if not os.path.exists(path):
         url = ("https://commons.wikimedia.org/wiki/Special:FilePath/"
                + urllib.parse.quote(name) + "?width=1200")
@@ -115,12 +130,13 @@ def main():
     cache = sys.argv[1]
     only = set(sys.argv[2:])
     os.makedirs(cache, exist_ok=True)
-    for slug, name, title, theme, level in PAINTINGS:
+    for slug, name, title, theme, level, *crop in PAINTINGS:
         if only and slug not in only:
             continue
         level = LEVEL[level]
         regions, colours, detail = pbn.LEVELS[level]
-        pic = pbn.picture(Image.open(fetch(cache, name)), regions, colours, detail=detail)
+        pic = pbn.picture(Image.open(fetch(cache, name)), regions, colours, detail=detail,
+                          crop=crop[0] if crop else None)
         pbn.write(pic, os.path.join(OUT, slug + ".svgz"),
                   {"name": title, "theme": theme, "level": level, "source": name})
         print(slug, len(pic["regions"]), len(pic["palette"]))

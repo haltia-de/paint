@@ -57,15 +57,18 @@ import concurrent.futures
 import fcntl
 import gzip
 import hashlib
+import itertools
 import json
 import math
 import os
+import queue
 import re
 import shutil
 import signal
 import subprocess
 import sys
 import threading
+import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -103,8 +106,12 @@ WORK = os.path.join(DATA, "work")
 PBN = next((p for p in (os.path.join(os.path.dirname(os.path.realpath(__file__)), "pbn.py"),
                         "/usr/local/lib/b8k-paint/pbn.py") if os.path.exists(p)),
            "/usr/local/lib/b8k-paint/pbn.py")
-LEVELS = (
+# Gallery sections, easier further up: a level, or a theme that has a
+# section of its own (its pictures then show there, whatever the level).
+SECTIONS = (
     (8, "Загруженные"),
+    (2, "Лёгкие"),
+    ("Японская гравюра", "Японская гравюра"),
     (3, "Крупные области"),
     (4, "Мелкие области"),
     (5, "Самые мелкие области"),
@@ -120,8 +127,13 @@ MAX_ZOOM = 14
 # NUMBER_MAX px.
 NUMBER_MIN = 13
 NUMBER_MAX = 30
-# A tap this far (screen px) beside a region of the chosen number paints it.
+# A tap this far (screen px) beside a region of the chosen number paints it;
+# a finger that moved further than TAP_SLOP drags rather than taps.
 FINGER = 40
+TAP_SLOP = 12
+# A zoom takes ZOOM_TIME s; a picture let go glides on, slowing by GLIDE.
+ZOOM_TIME = 0.22
+GLIDE = 4.0
 # The board is drawn in square tiles of this size, at most MAX_TILES kept
 # (a large region costs once per tile it is in).
 TILE = 512
@@ -139,7 +151,7 @@ PAGE = 24
 # the large view and the conversion.
 THUMB, LARGE = 330, 960
 # Sizes of regions one can pick: the level of pbn.py and how many
-# regions it makes at most (its LEVELS). The last, finer than any
+# regions it makes at most (LEVELS there). The last, finer than any
 # built-in picture, is for those who want more detail.
 GRADES = ((3, "Крупные", 300), (4, "Мелкие", 600), (5, "Очень мелкие", 1000))
 # What a picture may be on Wikidata (painting, print: Hokusai's waves are
@@ -776,11 +788,18 @@ class Board(Gtk.DrawingArea):
         self.chosen = 0
         self.scale = 1.0
         self.tiles = collections.OrderedDict()  # (column, row) -> surface
-        # After a zoom: the tiles of the zoom before, (scale, tiles), shown
-        # stretched where a tile is still to draw, and the tiles to draw.
+        # Tiles are drawn by a thread of their own; meanwhile their place
+        # shows the tiles of the zoom before stretched, (scale, tiles), over
+        # the whole picture small, (scale, surface).
         self.old = None
-        self.todo = []
-        self.drawing = None
+        self.base = None
+        self.zooms = 0  # one more at every zoom: tiles of another are dropped
+        self.asked = set()  # (zooms, tile) being drawn
+        self.version = 0  # one more at every tap or undo
+        self.changes = []  # (version, region) of the taps and undos
+        self.jobs = queue.PriorityQueue()
+        self.job_order = itertools.count()
+        threading.Thread(target=self.draw_tiles, daemon=True).start()
         self.previewing = False
         self.finished = False
         self.save_timer = None
@@ -789,82 +808,336 @@ class Board(Gtk.DrawingArea):
         # Taps are tested against the regions' paths on a context of its own.
         self.probe = cairo.Context(cairo.ImageSurface(cairo.FORMAT_A8, 1, 1))
         self.probe.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+        # The view: the board, the picture at scale, shows from (ox, oy) of
+        # it; while a zoom is on its way it shows at shown, stretched from
+        # the tiles at scale. A drag moves it and lets it glide on.
+        self.ox = self.oy = 0.0
+        self.shown = self.scale
+        self.snap = None
+        self.zooming = None  # (from scale, to, from centre, to centre, start)
+        self.glide = None  # (speed x, speed y, time) of a picture let go
+        self.trail = []  # (time, ox, oy) of the drag, for its speed
+        self.moved = 0.0
         self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
                         | Gdk.EventMask.TOUCH_MASK)
         self.connect("draw", self.on_draw)
+        self.connect("size-allocate", lambda _w, _a: self.app.on_view_size())
+        self.drag = Gtk.GestureDrag.new(self)
+        self.drag.connect("drag-begin", self.on_drag_begin)
+        self.drag.connect("drag-update", self.on_drag_update)
+        self.drag.connect("drag-end", self.on_drag_end)
         self.tap = Gtk.GestureMultiPress.new(self)
         self.tap.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
         self.tap.connect("released", self.on_tap)
+        self.ticking = False
 
     def set_scale(self, scale):
         if self.tiles:
             self.old = (self.scale, self.tiles)
-        self.scale = scale
+        self.zooms += 1
+        self.scale = self.shown = scale
         self.tiles = collections.OrderedDict()
-        self.set_size_request(math.ceil(scale * self.pic["w"]), math.ceil(scale * self.pic["h"]))
         self.queue_draw()
+
+    # the view
+    def size(self):
+        return self.get_allocated_width(), self.get_allocated_height()
+
+    def centre(self):
+        """The spot of the picture in the middle of the view."""
+        w, h = self.size()
+        return (self.ox + w / 2) / self.shown, (self.oy + h / 2) / self.shown
+
+    def offsets(self, scale, x, y):
+        """Where the view starts on the board at scale to show (x, y) of the
+        picture in its middle, as far as the picture reaches; a picture
+        smaller than the view sits in the middle."""
+        w, h = self.size()
+        out = []
+        for at, side, page in ((x, self.pic["w"], w), (y, self.pic["h"], h)):
+            full = side * scale
+            out.append((full - page) / 2 if full <= page
+                       else min(max(at * scale - page / 2, 0), full - page))
+        return out
+
+    def put(self, x, y):
+        """Show (x, y) of the picture in the middle of the view."""
+        self.ox, self.oy = self.offsets(self.shown, x, y)
+        self.queue_draw()
+
+    def look_at(self, scale, x, y, smooth=True):
+        """Zoom to scale with (x, y) in the middle: at once, or in a short
+        glide from the view now."""
+        self.glide = None
+        if not smooth or not self.get_mapped() or abs(scale - self.shown) < 1e-6:
+            self.zooming = None
+            if abs(scale - self.scale) > 1e-6:
+                self.set_scale(scale)
+            self.put(x, y)
+            return
+        # The view now, to stretch while the zoom goes on: one picture to
+        # draw a frame rather than many tiles.
+        w, h = self.size()
+        snap = cairo.ImageSurface(cairo.FORMAT_RGB24, w, h)
+        self.on_draw(self, cairo.Context(snap))
+        self.snap = (snap, self.shown, round(self.ox), round(self.oy))
+        self.zooming = (self.shown, scale, self.centre(), (x, y), time.monotonic())
+        # The tiles of the zoom it goes to are drawn meanwhile, those of
+        # its view first.
+        shown = self.shown
+        self.set_scale(scale)
+        self.shown = shown
+        ox, oy = self.offsets(scale, x, y)
+        for row in range(int(oy // TILE), int((oy + h - 1) // TILE) + 1):
+            for column in range(int(ox // TILE), int((ox + w - 1) // TILE) + 1):
+                self.ask((column, row), 0)
+        self.tick()
+
+    def tick(self):
+        """Move the view every frame while a zoom or glide is on."""
+        if not self.ticking:
+            self.ticking = True
+            self.add_tick_callback(self.on_tick)
+
+    def on_tick(self, _widget, _clock):
+        now = time.monotonic()
+        if self.zooming:
+            s0, s1, (x0, y0), (x1, y1), start = self.zooming
+            t = min(1.0, (now - start) / ZOOM_TIME)
+            t = 1 - (1 - t) ** 2  # quick, then gently in place
+            if t >= 1:
+                self.zooming = None
+                self.snap = None
+                self.shown = s1
+                self.put(x1, y1)
+            else:
+                self.shown = s0 * (s1 / s0) ** t
+                self.put(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)
+        elif self.glide:
+            vx, vy, last = self.glide
+            dt = now - last
+            ox, oy = self.ox, self.oy
+            self.ox += vx * dt
+            self.oy += vy * dt
+            x, y = self.centre()
+            self.put(x, y)
+            slow = math.exp(-dt * GLIDE)
+            vx, vy = vx * slow, vy * slow
+            stuck = abs(self.ox - ox) < 0.5 and abs(self.oy - oy) < 0.5
+            self.glide = None if stuck or math.hypot(vx, vy) < 40 else (vx, vy, now)
+        self.ticking = bool(self.zooming or self.glide)
+        return self.ticking
+
+    def on_drag_begin(self, _gesture, _x, _y):
+        self.glide = None
+        self.moved = 0.0
+        self.trail = [(time.monotonic(), self.ox, self.oy)]
+
+    def on_drag_update(self, _gesture, dx, dy):
+        if self.zooming:
+            return
+        self.moved = max(self.moved, math.hypot(dx, dy))
+        t0, ox0, oy0 = self.trail[0]
+        self.ox, self.oy = ox0 - dx, oy0 - dy
+        x, y = self.centre()
+        self.put(x, y)
+        now = time.monotonic()
+        self.trail = [p for p in self.trail if now - p[0] < 0.1 or p is self.trail[0]]
+        self.trail.append((now, self.ox, self.oy))
+
+    def on_drag_end(self, _gesture, _dx, _dy):
+        # The speed of the last tenth of a second, as one throws it.
+        now = time.monotonic()
+        recent = [p for p in self.trail[1:] if now - p[0] < 0.1]
+        if len(recent) >= 2 and self.moved > TAP_SLOP:
+            (t0, x0, y0), (t1, x1, y1) = recent[0], recent[-1]
+            if t1 - t0 > 0.01:
+                self.glide = ((x1 - x0) / (t1 - t0), (y1 - y0) / (t1 - t0), now)
+                self.tick()
+
+    def queue_board(self, x, y, w, h):
+        """Draw again a rectangle of the board (not of the view)."""
+        self.queue_draw_area(int(x - round(self.ox)) - 1, int(y - round(self.oy)) - 1,
+                             int(w) + 3, int(h) + 3)
+
+
+    def stop(self):
+        """No more tiles: the board is closed."""
+        self.zooms += 1
+        self.jobs.put((-9, 0, None))
 
     def left(self, number):
         return self.counts[number]
 
-    def colour(self, i):
-        n = self.regions[i].n
-        return self.full[n] if i in self.filled else self.grey[n]
+    def looks(self, filled, chosen):
+        """How regions look with these painted and this number chosen:
+        (fill, outline, number) for draw_regions. Still to paint: grey,
+        outlined, a grey number; those of the chosen number light blue with
+        a bold dark one."""
+        regs = self.regions
 
-    def tile(self, column, row):
-        """The board at (column, row) of TILE-pixel squares: every region
-        in its colour or grey, outlines and grey numbers."""
-        image = self.tiles.get((column, row))
-        if image:
-            self.tiles.move_to_end((column, row))
-            return image
+        def fill(i):
+            n = regs[i].n
+            if i in filled:
+                return self.full[n]
+            return MARK if n == chosen else self.grey[n]
+
+        def number(i):
+            if i in filled:
+                return None
+            return ((0.1, 0.12, 0.14), True) if regs[i].n == chosen else ((0.42, 0.42, 0.45), False)
+
+        return fill, lambda i: i not in filled, number
+
+    def draw_tile(self, scale, key, filled, chosen):
+        """The board at key (column, row) of TILE-pixel squares at scale,
+        with these regions painted and this number chosen."""
+        column, row = key
         image = cairo.ImageSurface(cairo.FORMAT_RGB24, TILE, TILE)
         cr = cairo.Context(image)
         cr.set_source_rgb(0.9, 0.9, 0.89)
         cr.paint()
         cr.translate(-column * TILE, -row * TILE)
-        s = self.scale
         # A number can reach over the edge of the tile its region is in.
-        m = NUMBER_MAX / s
-        todo = regions_in(self.pic, column * TILE / s - m, row * TILE / s - m,
-                          (column + 1) * TILE / s + m, (row + 1) * TILE / s + m)
-        draw_regions(cr, self.pic, s, todo, self.colour, lambda i: i not in self.filled,
-                     lambda i: None if i in self.filled else ((0.42, 0.42, 0.45), False))
-        self.tiles[column, row] = image
-        while len(self.tiles) > MAX_TILES:
-            self.tiles.popitem(last=False)
+        m = NUMBER_MAX / scale
+        todo = regions_in(self.pic, column * TILE / scale - m, row * TILE / scale - m,
+                          (column + 1) * TILE / scale + m, (row + 1) * TILE / scale + m)
+        draw_regions(cr, self.pic, scale, todo, *self.looks(filled, chosen))
+        image.flush()
         return image
 
+    def draw_base(self, filled):
+        """The whole picture at 1 px a unit, without numbers."""
+        image = whole_picture(self.pic, self.pic["w"], self.pic["h"],
+                              *self.looks(filled, None)[:2])
+        image.flush()
+        return image
+
+    def draw_tiles(self):
+        """The thread that draws tiles, those on the screen first. cairo
+        lets the rest of the program run while it fills."""
+        while True:
+            _order, _n, job = self.jobs.get()
+            if job is None:
+                return
+            zooms, scale, key, filled, chosen, version = job
+            if key is not None and zooms != self.zooms:
+                continue
+            try:
+                image = (self.draw_base(filled) if key is None
+                         else self.draw_tile(scale, key, filled, chosen))
+            except Exception as exc:  # a drawing must not stop the thread
+                sys.stderr.write("b8k-paint: tile %s: %s\n" % (key, exc))
+                continue
+            GLib.idle_add(self.tile_ready, zooms, scale, key, chosen, image, version)
+
+    def ask(self, key, order):
+        """Have a tile drawn (key None: the whole picture small)."""
+        # The small whole picture is the same at every zoom.
+        zooms = -1 if key is None else self.zooms
+        if (zooms, key) in self.asked or key in self.tiles:
+            return
+        self.asked.add((zooms, key))
+        self.jobs.put((order, next(self.job_order),
+                       (zooms, self.scale, key, frozenset(self.filled), self.chosen,
+                        self.version)))
+
+    def tile_ready(self, zooms, scale, key, chosen, image, version):
+        self.asked.discard((zooms, key))
+        if key is None:
+            self.base = (1.0, image)
+            todo = [i for v, i in self.changes if v > version]
+            for i in todo:
+                self.paint_into(image, 1.0, (0, 0), i, numbers=False)
+            self.queue_draw()
+            return False
+        if zooms != self.zooms:
+            return False
+        if chosen != self.chosen:
+            # Another colour was chosen meanwhile: draw it again.
+            self.queue_board(key[0] * TILE, key[1] * TILE, TILE, TILE)
+            return False
+        # Taps and undos while it was drawn.
+        for v, i in self.changes:
+            if v > version and self.meets(key, i):
+                self.paint_into(image, scale, key, i)
+        self.tiles[key] = image
+        while len(self.tiles) > MAX_TILES:
+            self.tiles.popitem(last=False)
+        if not self.zooming and all(k in self.tiles for k in self.in_view()):
+            self.old = None
+        self.queue_board(key[0] * TILE, key[1] * TILE, TILE, TILE)
+        return False
+
+    def in_view(self, more=0):
+        """The tiles on the screen, and more around them."""
+        w, h = self.size()
+        x0, y0 = self.ox, self.oy
+        x1, y1 = x0 + w, y0 + h
+        columns = math.ceil(self.scale * self.pic["w"] / TILE)
+        rows = math.ceil(self.scale * self.pic["h"] / TILE)
+        return [(c, r) for r in range(max(0, int(y0 // TILE) - more),
+                                      min(rows, int((y1 - 1) // TILE) + 1 + more))
+                for c in range(max(0, int(x0 // TILE) - more),
+                               min(columns, int((x1 - 1) // TILE) + 1 + more))]
+
+    def meets(self, key, i):
+        s = self.scale
+        x0, y0, x1, y1 = self.regions[i].box
+        m = NUMBER_MAX
+        return (key[0] * TILE < x1 * s + m and (key[0] + 1) * TILE > x0 * s - m
+                and key[1] * TILE < y1 * s + m and (key[1] + 1) * TILE > y0 * s - m)
+
     def on_draw(self, _widget, cr):
+        cr.set_source_rgb(0.9, 0.9, 0.89)
+        cr.paint()
+        # Whole pixels: a tile then is copied, not resampled (ten times
+        # quicker on the tablet).
+        cr.translate(-round(self.ox), -round(self.oy))
+        if self.zooming:
+            # A zoom on its way: the whole picture small, and over it the
+            # view as it was, both stretched.
+            cr.save()
+            cr.scale(self.shown / self.scale, self.shown / self.scale)
+            self.stand_in(cr, [])
+            cr.restore()
+            snap, scale, ox, oy = self.snap
+            cr.scale(self.shown / scale, self.shown / scale)
+            cr.set_source_surface(snap, ox, oy)
+            cr.get_source().set_filter(cairo.FILTER_FAST)
+            cr.paint()
+            return False
         x0, y0, x1, y1 = cr.clip_extents()
         s = self.scale
         if self.previewing or self.finished:
+            cr.rectangle(0, 0, s * self.pic["w"], s * self.pic["h"])
             cr.set_source_rgb(1, 1, 1)
-            cr.paint()
+            cr.fill()
             draw_regions(cr, self.pic, s, regions_in(self.pic, x0 / s, y0 / s, x1 / s, y1 / s),
                          lambda i: self.full[self.regions[i].n])
             return False
-        todo = []
-        for row in range(int(y0 // TILE), int((y1 - 1) // TILE) + 1):
-            for column in range(int(x0 // TILE), int((x1 - 1) // TILE) + 1):
-                if (column, row) not in self.tiles and self.old:
-                    # A zoom shows at once, stretched, and sharpens tile by tile.
-                    self.stretched(cr, column, row)
-                    todo.append((column, row))
+        if self.base is None:
+            self.ask(None, -1)
+        missing = []
+        columns = math.ceil(s * self.pic["w"] / TILE)
+        rows = math.ceil(s * self.pic["h"] / TILE)
+        for row in range(max(0, int(y0 // TILE)), min(rows, int((y1 - 1) // TILE) + 1)):
+            for column in range(max(0, int(x0 // TILE)), min(columns, int((x1 - 1) // TILE) + 1)):
+                image = self.tiles.get((column, row))
+                if image is None:
+                    missing.append((column, row))
+                    self.ask((column, row), 0)
                     continue
-                cr.set_source_surface(self.tile(column, row), column * TILE, row * TILE)
+                self.tiles.move_to_end((column, row))
+                cr.set_source_surface(image, column * TILE, row * TILE)
                 cr.rectangle(column * TILE, row * TILE, TILE, TILE)
                 cr.fill()
-        if todo:
-            self.todo = todo
-            if not self.drawing:
-                self.drawing = GLib.idle_add(self.draw_next)
-        # The chosen number's regions, over the tiles: choosing another
-        # colour then costs no tiles.
-        chosen = [i for i in regions_in(self.pic, x0 / s, y0 / s, x1 / s, y1 / s)
-                  if self.regions[i].n == self.chosen and i not in self.filled]
-        draw_regions(cr, self.pic, s, chosen, lambda i: MARK, lambda i: True,
-                     lambda i: ((0.1, 0.12, 0.14), True))
+        if missing:
+            self.stand_in(cr, missing)
+        # Then the tiles around the screen, for the next drag.
+        for key in self.in_view(1):
+            if len(self.tiles) + len(self.asked) < MAX_TILES:
+                self.ask(key, 1)
         if self.wrong is not None:
             cr.save()
             cr.scale(s, s)
@@ -875,69 +1148,94 @@ class Board(Gtk.DrawingArea):
             cr.stroke()
         return False
 
-    def stretched(self, cr, column, row):
-        """A tile's place from the tiles of the zoom before."""
-        scale, tiles = self.old
-        f = self.scale / scale
+    def stand_in(self, cr, missing):
+        """The places of tiles not drawn yet: the whole picture small, and
+        after zooming in the tiles of the zoom before, stretched (with no
+        tiles missing: the whole picture small, everywhere). Quick rather
+        than fine: it shows for a moment."""
         cr.save()
-        cr.rectangle(column * TILE, row * TILE, TILE, TILE)
+        cr.rectangle(0, 0, self.scale * self.pic["w"], self.scale * self.pic["h"])
         cr.clip()
+        if missing:
+            for column, row in missing:
+                cr.rectangle(column * TILE, row * TILE, TILE, TILE)
+            cr.clip()
         cr.set_source_rgb(0.9, 0.9, 0.89)
         cr.paint()
-        cr.scale(f, f)
-        x0, y0 = column * TILE / f, row * TILE / f
-        x1, y1 = x0 + TILE / f, y0 + TILE / f
-        for (c, r), image in tiles.items():
-            if c * TILE < x1 and (c + 1) * TILE > x0 and r * TILE < y1 and (r + 1) * TILE > y0:
-                cr.set_source_surface(image, c * TILE, r * TILE)
-                cr.paint()
+        if self.base:
+            scale, image = self.base
+            cr.save()
+            cr.scale(self.scale / scale, self.scale / scale)
+            cr.set_source_surface(image, 0, 0)
+            cr.get_source().set_filter(cairo.FILTER_FAST)
+            cr.paint()
+            cr.restore()
+        layers = []
+        if self.old and self.old[0] < self.scale and missing:
+            layers.append(self.old)
+        for scale, tiles in layers:
+            cr.save()
+            f = self.scale / scale
+            x0, y0, x1, y1 = cr.clip_extents()
+            cr.scale(f, f)
+            x0, y0, x1, y1 = x0 / f, y0 / f, x1 / f, y1 / f
+            for (c, r), image in tiles.items():
+                if c * TILE < x1 and (c + 1) * TILE > x0 and r * TILE < y1 and (r + 1) * TILE > y0:
+                    cr.set_source_surface(image, c * TILE, r * TILE)
+                    cr.get_source().set_filter(cairo.FILTER_FAST)
+                    cr.paint()
+            cr.restore()
         cr.restore()
 
-    def draw_next(self):
-        """Draw one tile still shown stretched; idle, until none is left."""
-        while self.todo:
-            key = self.todo.pop(0)
-            if key not in self.tiles:
-                self.tile(*key)
-                self.queue_draw_area(key[0] * TILE, key[1] * TILE, TILE, TILE)
-                return True
-        self.drawing = None
-        self.old = None
-        return False
-
     def redraw(self, i):
-        """Draw a region again: its tiles and its place on the screen."""
+        """Show a region's place again (its tiles stay)."""
         s = self.scale
         x0, y0, x1, y1 = self.regions[i].box
-        x0, y0 = x0 * s - NUMBER_MAX, y0 * s - NUMBER_MAX
-        x1, y1 = x1 * s + NUMBER_MAX, y1 * s + NUMBER_MAX
-        for key in [k for k in self.tiles
-                    if k[0] * TILE < x1 and (k[0] + 1) * TILE > x0
-                    and k[1] * TILE < y1 and (k[1] + 1) * TILE > y0]:
-            del self.tiles[key]
-        self.queue_draw_area(int(x0), int(y0), int(x1 - x0) + 1, int(y1 - y0) + 1)
+        self.queue_board(x0 * s - NUMBER_MAX, y0 * s - NUMBER_MAX,
+                         (x1 - x0) * s + 2 * NUMBER_MAX, (y1 - y0) * s + 2 * NUMBER_MAX)
 
-    def paint_over(self, i):
-        """Paint a region into the tiles kept, rather than draw them again:
-        its colour over its grey and number, then the outlines of the
-        unpainted regions around it, which its edge covered a little."""
-        s = self.scale
+    def paint_into(self, image, scale, key, i, numbers=True):
+        """Draw a region as it is now into a tile (or the small whole
+        picture): its colour, or grey with its number; then the outlines
+        of the unpainted regions around it, which its edge covered a little."""
         x0, y0, x1, y1 = self.regions[i].box
         around = [j for j in regions_in(self.pic, x0, y0, x1, y1) if j not in self.filled]
-        for (column, row), image in self.tiles.items():
-            if not (column * TILE < x1 * s and (column + 1) * TILE > x0 * s
-                    and row * TILE < y1 * s and (row + 1) * TILE > y0 * s):
-                continue
-            cr = cairo.Context(image)
-            cr.translate(-column * TILE, -row * TILE)
-            draw_regions(cr, self.pic, s, [i], self.colour)
-            draw_regions(cr, self.pic, s, around, None, lambda j: True)
-            image.flush()
-        self.queue_draw_area(int(x0 * s) - 2, int(y0 * s) - 2, int((x1 - x0) * s) + 4,
-                             int((y1 - y0) * s) + 4)
+        cr = cairo.Context(image)
+        cr.translate(-key[0] * TILE, -key[1] * TILE)
+        fill, _outline, number = self.looks(self.filled, self.chosen if numbers else None)
+        draw_regions(cr, self.pic, scale, [i], fill)
+        draw_regions(cr, self.pic, scale, around, None, lambda j: True,
+                     (lambda j: number(j) if j == i else None) if numbers else None)
+        image.flush()
+
+    def paint_over(self, i):
+        """A tap or undo changed region i: draw it into the tiles kept, the
+        small whole picture too, rather than drawing them again."""
+        self.version += 1
+        self.changes.append((self.version, i))
+        del self.changes[:-500]
+        for key, image in self.tiles.items():
+            if self.meets(key, i):
+                self.paint_into(image, self.scale, key, i)
+        if self.base:
+            self.paint_into(self.base[1], self.base[0], (0, 0), i, numbers=False)
+        self.redraw(i)
 
     def set_chosen(self, number):
-        self.chosen = number
+        """Choose a number: its regions turn blue in the tiles on the
+        screen, those of the number before grey; tiles off the screen are
+        drawn again when needed."""
+        old, self.chosen = self.chosen, number
+        if old == number:
+            return
+        view = set(self.in_view()) if self.get_mapped() else set()
+        for key in [k for k in self.tiles if k not in view]:
+            del self.tiles[key]
+        for key, image in self.tiles.items():
+            for n in (old, number):
+                for i in self.of[n]:
+                    if i not in self.filled and self.meets(key, i):
+                        self.paint_into(image, self.scale, key, i)
         self.queue_draw()
 
     def set_preview(self, on):
@@ -985,9 +1283,10 @@ class Board(Gtk.DrawingArea):
         return None
 
     def on_tap(self, _gesture, _n, px, py):
-        if self.previewing or self.finished:
+        # A drag is not a tap, nor is a tap while the picture moves.
+        if self.previewing or self.finished or self.zooming or self.moved > TAP_SLOP:
             return
-        x, y = px / self.scale, py / self.scale
+        x, y = (px + round(self.ox)) / self.scale, (py + round(self.oy)) / self.scale
         i = self.hit(x, y)
         if i is None or i in self.filled or self.regions[i].n != self.chosen:
             # A finger beside a small region of the chosen number.
@@ -1029,7 +1328,7 @@ class Board(Gtk.DrawingArea):
         self.filled.discard(i)
         number = self.regions[i].n
         self.counts[number] += 1
-        self.redraw(i)
+        self.paint_over(i)
         self.save_soon()
         self.app.region_painted(number)
 
@@ -1115,12 +1414,16 @@ class Paint:
         pictures, waiting = load_pictures()
         for path in waiting:
             self.make_photo(path)
-        for level, heading in LEVELS:
-            # By theme; downloaded ones newest first.
-            pics = sorted((p for p in pictures if p.get("level") == level),
-                          key=lambda p: (THEMES.index(p["theme"]) if p.get("theme") in THEMES
+        own = {key for key, _heading in SECTIONS if isinstance(key, str)}
+        for key, heading in SECTIONS:
+            # By level and theme; downloaded ones newest first.
+            pics = sorted((p for p in pictures
+                           if (p.get("theme") == key if key in own
+                               else p.get("level") == key and p.get("theme") not in own)),
+                          key=lambda p: (p.get("level", 0),
+                                         THEMES.index(p["theme"]) if p.get("theme") in THEMES
                                          else len(THEMES),
-                                         -p.get("mtime", 0) if level == 8 else 0))
+                                         -p.get("mtime", 0) if key == 8 else 0))
             if not pics:
                 continue
             label = Gtk.Label(label=heading, xalign=0)
@@ -1692,6 +1995,8 @@ class Paint:
         old = self.stack.get_child_by_name("board")
         if old:
             self.stack.remove(old)
+        if self.board:
+            self.board.stop()
         self.board = Board(self, pic)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         middle = Gtk.Box()
@@ -1711,19 +2016,12 @@ class Paint:
                 tools.pack_start(Gtk.Box(), True, True, 0)
         middle.pack_end(tools, False, False, 0)
 
-        self.scroll = Gtk.ScrolledWindow()
-        self.scroll.set_kinetic_scrolling(True)
-        self.scroll.connect("size-allocate", self.on_view_size)
+        # The board moves and zooms the picture itself: a scrolled window
+        # costs a third of the frames on the tablet.
         self.view_size = None
         self.zoom = None
         self.whole_back = None
-        self.scroll.get_style_context().add_class("paint-bg")
-        holder = Gtk.Box()
-        holder.set_halign(Gtk.Align.CENTER)
-        holder.set_valign(Gtk.Align.CENTER)
-        holder.pack_start(self.board, False, False, 0)
-        self.scroll.add(holder)
-        middle.pack_start(self.scroll, True, True, 0)
+        middle.pack_start(self.board, True, True, 0)
 
         pal_scroll = Gtk.ScrolledWindow()
         pal_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
@@ -1787,11 +2085,7 @@ class Paint:
     def find(self):
         """Centre the view on the nearest unpainted region of the chosen
         colour, zoomed in far enough to read its number."""
-        h, v = self.scroll.get_hadjustment(), self.scroll.get_vadjustment()
-        s = self.board.scale
-        cx = (h.get_value() + h.get_page_size() / 2) / s
-        cy = (v.get_value() + v.get_page_size() / 2) / s
-        i = self.board.nearest(cx, cy)
+        i = self.board.nearest(*self.board.centre())
         if i is None or not self.view_size:
             return
         reg = self.board.regions[i]
@@ -1801,14 +2095,15 @@ class Paint:
         want = 20 / (1.2 * max(reg.r, 0.5))
         index = max(self.zoom or 0,
                     next((k for k, z in enumerate(steps) if z >= want), len(steps) - 1))
-        self.set_zoom(index, (reg.x / self.board.pic["w"], reg.y / self.board.pic["h"]))
+        self.set_zoom(index, (reg.x, reg.y))
 
-    def on_view_size(self, _widget, alloc):
-        size = (alloc.width, alloc.height)
-        if size == self.view_size or alloc.width < 50:
+    def on_view_size(self):
+        size = self.board.size()
+        if size == self.view_size or size[0] < 50:
             return
+        first = self.view_size is None
         self.view_size = size
-        GLib.idle_add(self.set_zoom, self.zoom)
+        GLib.idle_add(self.set_zoom, self.zoom, None, not first)
 
     def steps(self):
         """Zooms: the whole picture in view, then larger by ZOOM_STEP."""
@@ -1819,28 +2114,16 @@ class Paint:
             steps.append(steps[-1] * ZOOM_STEP)
         return steps
 
-    def set_zoom(self, index, focus=None):
+    def set_zoom(self, index, focus=None, smooth=True):
+        """Zoom to a step, with focus (a spot of the picture; else the
+        middle of the view) in the middle."""
         if not self.board or not self.view_size:
             return False
         steps = self.steps()
         # A picture opens whole, as in the colouring apps.
         index = max(0, min(index or 0, len(steps) - 1))
-        # Keep the middle of the view on the same spot of the picture.
-        h, v = self.scroll.get_hadjustment(), self.scroll.get_vadjustment()
-        if focus:
-            fx, fy = focus
-        else:
-            fx = (h.get_value() + h.get_page_size() / 2) / max(1, h.get_upper())
-            fy = (v.get_value() + v.get_page_size() / 2) / max(1, v.get_upper())
         self.zoom = index
-        self.board.set_scale(steps[index])
-
-        def recentre():
-            for adj, f in ((h, fx), (v, fy)):
-                adj.set_value(f * adj.get_upper() - adj.get_page_size() / 2)
-            return False
-
-        GLib.timeout_add(60, recentre)
+        self.board.look_at(steps[index], *(focus or self.board.centre()), smooth=smooth)
         return False
 
     def zoom_in(self):
@@ -1864,10 +2147,7 @@ class Paint:
             return
         if self.zoom == 0:
             return
-        h, v = self.scroll.get_hadjustment(), self.scroll.get_vadjustment()
-        focus = ((h.get_value() + h.get_page_size() / 2) / max(1, h.get_upper()),
-                 (v.get_value() + v.get_page_size() / 2) / max(1, v.get_upper()))
-        self.whole_back = (self.zoom, focus)
+        self.whole_back = (self.zoom, self.board.centre())
         self.whole_button.get_style_context().add_class("on")
         self.set_zoom(0)
 
@@ -1924,6 +2204,8 @@ class Paint:
             self.show_search()
             return
         self.save()
+        if self.board:
+            self.board.stop()
         self.board = None
         self.show_gallery()
 
