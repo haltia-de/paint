@@ -19,6 +19,11 @@ bottom has one big button per number. Pick a colour, tap its regions.
   chosen colour in the middle, zoomed in until its number reads), undo,
   and "look" (the finished picture while held). A drag moves the
   picture, which glides on when let go; a zoom takes a moment's glide.
+  Two fingers zoom and move it too, where the desktop passes them.
+  Fingers are followed one by one (GTK's gestures follow only the
+  first): a finger that does not move taps, unless another one was on
+  the screen just then; one lying still for a while (a thumb holding
+  the tablet, or one whose lift was lost after a palm) is left out.
 - A wrong tap gets a red outline; there is no timer, no score, no ads.
 - Progress is saved after every tap, so a picture can wait for tomorrow;
   the program starts on the last picture, unless it is finished, and the
@@ -141,6 +146,9 @@ NUMBER_MAX = 30
 # a finger that moved further than TAP_SLOP drags rather than taps.
 FINGER = 40
 TAP_SLOP = 12
+# A finger that sent nothing for LIVE s lies still (a thumb holding the
+# tablet, or one whose lift was lost): it is not part of a gesture.
+LIVE = 1.5
 # A zoom takes ZOOM_TIME s; a picture let go glides on, slowing by GLIDE.
 ZOOM_TIME = 0.22
 GLIDE = 4.0
@@ -871,17 +879,26 @@ class Board(Gtk.DrawingArea):
         self.glide = None  # (speed x, speed y, time) of a picture let go
         self.trail = []  # (time, ox, oy) of the drag, for its speed
         self.moved = 0.0
+        self.press = None  # a mouse button held: (x, y, ox, oy) then
         self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
-                        | Gdk.EventMask.TOUCH_MASK)
+                        | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.TOUCH_MASK)
         self.connect("draw", self.on_draw)
         self.connect("size-allocate", lambda _w, _a: self.app.on_view_size())
-        self.drag = Gtk.GestureDrag.new(self)
-        self.drag.connect("drag-begin", self.on_drag_begin)
-        self.drag.connect("drag-update", self.on_drag_update)
-        self.drag.connect("drag-end", self.on_drag_end)
-        self.tap = Gtk.GestureMultiPress.new(self)
-        self.tap.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
-        self.tap.connect("released", self.on_tap)
+        # A mouse: press, drag, release.
+        self.connect("button-press-event", self.on_press)
+        self.connect("motion-notify-event", self.on_motion)
+        self.connect("button-release-event", self.on_release)
+        # Fingers are followed one by one, not with GTK's gestures: those
+        # follow only the first finger (and keep its moves from the rest),
+        # so a thumb resting on the screen, or a finger whose lift the
+        # tablet lost after a palm, would stop every tap. Any finger that
+        # does not move taps; one moving finger drags; two moving fingers
+        # zoom and move the picture.
+        self.fingers = {}  # sequence -> what it did
+        self.panning = None  # the finger dragging the picture
+        self.pinching = None  # (finger a, b, scale, distance, spot under them)
+        self.touched = 0.0  # when a finger last did something
+        self.connect("touch-event", self.on_touch)
         self.ticking = False
 
     def set_scale(self, scale):
@@ -981,32 +998,169 @@ class Board(Gtk.DrawingArea):
         self.ticking = bool(self.zooming or self.glide)
         return self.ticking
 
-    def on_drag_begin(self, _gesture, _x, _y):
-        self.glide = None
-        self.moved = 0.0
-        self.trail = [(time.monotonic(), self.ox, self.oy)]
+    def on_touch(self, _widget, event):
+        seq, x, y = event.touch.sequence, event.x, event.y
+        now = self.touched = time.monotonic()
+        kind = event.type
+        if kind == Gdk.EventType.TOUCH_BEGIN:
+            self.glide = None
+            # A finger whose lift was lost stops counting after a while.
+            for k in [k for k, f in self.fingers.items() if now - f["last"] > 8]:
+                del self.fingers[k]
+            # Another finger on the screen just now makes this one part of
+            # a gesture: it does not tap. A finger lying still for a while
+            # (a thumb holding the tablet) does not count.
+            others = [k for k, g in self.fingers.items() if now - g["last"] < LIVE]
+            for k in others:
+                self.fingers[k]["gesture"] = True
+            self.fingers[seq] = {"x0": x, "y0": y, "x": x, "y": y, "t0": now, "last": now,
+                                 "moved": False, "gesture": bool(others), "updates": 0}
+            return False
+        f = self.fingers.get(seq)
+        if f is None:
+            return False
+        if kind == Gdk.EventType.TOUCH_UPDATE:
+            f["updates"] += 1
+            self.finger_moved(seq, f, x, y, now)
+            return False
+        # The finger is lifted, or the tablet took it back (a palm).
+        del self.fingers[seq]
+        if self.pinching and seq in self.pinching[:2]:
+            self.pinch_end()
+        elif self.panning == seq:
+            self.panning = None
+            if kind == Gdk.EventType.TOUCH_END:
+                self.let_go(now)
+        elif (kind == Gdk.EventType.TOUCH_END and not f["moved"] and not f["gesture"]
+              and now - f["t0"] < 1.5):
+            self.tapped(x, y)
+        return False
 
-    def on_drag_update(self, _gesture, dx, dy):
+    def finger_moved(self, seq, f, x, y, now):
+        f["x"], f["y"], f["last"] = x, y, now
+        if not f["moved"] and math.hypot(x - f["x0"], y - f["y0"]) > TAP_SLOP:
+            f["moved"] = True
         if self.zooming:
             return
-        self.moved = max(self.moved, math.hypot(dx, dy))
-        t0, ox0, oy0 = self.trail[0]
-        self.ox, self.oy = ox0 - dx, oy0 - dy
-        x, y = self.centre()
-        self.put(x, y)
-        now = time.monotonic()
-        self.trail = [p for p in self.trail if now - p[0] < 0.1 or p is self.trail[0]]
-        self.trail.append((now, self.ox, self.oy))
+        if self.pinching:
+            self.pinch_to()
+            return
+        # Two fingers on the screen zoom once one of them moves (on the
+        # tablet a first finger's moves are not passed while a second is
+        # down: its place stays where it was).
+        live = [k for k, g in self.fingers.items() if now - g["last"] < LIVE or k == seq]
+        if len(live) >= 2 and f["moved"]:
+            other = max((k for k in live if k != seq), key=lambda k: self.fingers[k]["t0"])
+            self.pinch_from(other, seq)
+        elif f["moved"] and not f["gesture"]:
+            self.drag_by(seq, f, now)
 
-    def on_drag_end(self, _gesture, _dx, _dy):
-        # The speed of the last tenth of a second, as one throws it.
-        now = time.monotonic()
-        recent = [p for p in self.trail[1:] if now - p[0] < 0.1]
-        if len(recent) >= 2 and self.moved > TAP_SLOP:
+    def drag_by(self, seq, f, now):
+        """One finger moves the picture with it."""
+        if self.panning != seq:
+            self.panning = seq
+            f["px"], f["py"] = f["x0"], f["y0"]
+            self.trail = [(now, self.ox, self.oy)]
+        self.ox -= f["x"] - f["px"]
+        self.oy -= f["y"] - f["py"]
+        f["px"], f["py"] = f["x"], f["y"]
+        self.put(*self.centre())
+        self.trail = [p for p in self.trail if now - p[0] < 0.1] + [(now, self.ox, self.oy)]
+
+    def let_go(self, now):
+        """A drag ends: the picture glides on at the speed it was thrown."""
+        recent = [p for p in self.trail if now - p[0] < 0.1]
+        if len(recent) >= 2:
             (t0, x0, y0), (t1, x1, y1) = recent[0], recent[-1]
             if t1 - t0 > 0.01:
                 self.glide = ((x1 - x0) / (t1 - t0), (y1 - y0) / (t1 - t0), now)
                 self.tick()
+
+    def pinch_from(self, a, b):
+        """Two fingers start to zoom: the view so far, to stretch."""
+        fa, fb = self.fingers[a], self.fingers[b]
+        fa["gesture"] = fb["gesture"] = True
+        self.panning = None
+        mx, my = (fa["x"] + fb["x"]) / 2, (fa["y"] + fb["y"]) / 2
+        w, h = self.size()
+        snap = cairo.ImageSurface(cairo.FORMAT_RGB24, w, h)
+        self.on_draw(self, cairo.Context(snap))
+        self.snap = (snap, self.shown, round(self.ox), round(self.oy))
+        self.pinching = (a, b, self.shown, max(1.0, math.hypot(fa["x"] - fb["x"], fa["y"] - fb["y"])),
+                         ((mx + self.ox) / self.shown, (my + self.oy) / self.shown))
+
+    def pinch_to(self):
+        a, b, s0, d0, (px, py) = self.pinching
+        fa, fb = self.fingers[a], self.fingers[b]
+        mx, my = (fa["x"] + fb["x"]) / 2, (fa["y"] + fb["y"]) / 2
+        low = self.app.steps()[0] if self.app.view_size else s0
+        d = math.hypot(fa["x"] - fb["x"], fa["y"] - fb["y"])
+        self.shown = min(max(s0 * d / d0, low), MAX_ZOOM)
+        # The spot under the fingers stays under them.
+        w, h = self.size()
+        self.put((px * self.shown - mx + w / 2) / self.shown, (py * self.shown - my + h / 2) / self.shown)
+
+    def pinch_end(self):
+        """One of the two fingers lifted: the zoom stays where it got to;
+        the other finger neither taps nor drags any more."""
+        a, b = self.pinching[:2]
+        for k in (a, b):
+            if k in self.fingers:
+                self.fingers[k]["gesture"] = True
+                self.fingers[k]["moved"] = False
+        self.pinching = None
+        self.snap = None
+        x, y = self.centre()
+        shown = self.shown
+        self.shown = self.scale
+        self.app.zoomed(shown)
+        self.look_at(shown, x, y, smooth=False)
+
+    # a mouse
+    def mouse(self, event):
+        """Whether an event is a mouse's own: GTK also makes mouse events of
+        fingers (a second finger landing even "clicks")."""
+        return not event.get_pointer_emulated() and time.monotonic() - self.touched > 1
+
+    def on_press(self, _widget, event):
+        if event.button != 1 or not self.mouse(event):
+            return False
+        self.glide = None
+        self.moved = 0.0
+        self.press = (event.x, event.y, self.ox, self.oy)
+        self.trail = [(time.monotonic(), self.ox, self.oy)]
+        return True
+
+    def on_motion(self, _widget, event):
+        if self.fingers and not self.press:
+            # With two fingers down the first one's moves come as mouse
+            # moves on the tablet (not marked as made from a finger): they
+            # are the moves of the finger that sends none of its own.
+            quiet = [k for k, f in self.fingers.items() if not f["updates"]]
+            if quiet:
+                seq = min(quiet, key=lambda k: self.fingers[k]["t0"])
+                self.touched = time.monotonic()
+                self.finger_moved(seq, self.fingers[seq], event.x, event.y, self.touched)
+            return True
+        if not self.mouse(event) or self.zooming or not self.press:
+            return False
+        x0, y0, ox0, oy0 = self.press
+        self.moved = max(self.moved, math.hypot(event.x - x0, event.y - y0))
+        self.ox, self.oy = ox0 - (event.x - x0), oy0 - (event.y - y0)
+        self.put(*self.centre())
+        now = time.monotonic()
+        self.trail = [p for p in self.trail if now - p[0] < 0.1] + [(now, self.ox, self.oy)]
+        return True
+
+    def on_release(self, _widget, event):
+        if event.button != 1 or not self.mouse(event) or not self.press:
+            return False
+        self.press = None
+        if self.moved > TAP_SLOP:
+            self.let_go(time.monotonic())
+        else:
+            self.tapped(event.x, event.y)
+        return True
 
     def queue_board(self, x, y, w, h):
         """Draw again a rectangle of the board (not of the view)."""
@@ -1117,7 +1271,7 @@ class Board(Gtk.DrawingArea):
         self.tiles[key] = image
         while len(self.tiles) > MAX_TILES:
             self.tiles.popitem(last=False)
-        if not self.zooming and all(k in self.tiles for k in self.in_view()):
+        if not (self.zooming or self.pinching) and all(k in self.tiles for k in self.in_view()):
             self.old = None
         self.queue_board(key[0] * TILE, key[1] * TILE, TILE, TILE)
         return False
@@ -1147,7 +1301,7 @@ class Board(Gtk.DrawingArea):
         # Whole pixels: a tile then is copied, not resampled (ten times
         # quicker on the tablet).
         cr.translate(-round(self.ox), -round(self.oy))
-        if self.zooming:
+        if self.zooming or self.pinching:
             # A zoom on its way: the whole picture small, and over it the
             # view as it was, both stretched.
             cr.save()
@@ -1335,9 +1489,9 @@ class Board(Gtk.DrawingArea):
                     return i
         return None
 
-    def on_tap(self, _gesture, _n, px, py):
-        # A drag is not a tap, nor is a tap while the picture moves.
-        if self.previewing or self.finished or self.zooming or self.moved > TAP_SLOP:
+    def tapped(self, px, py):
+        # Not while the picture moves.
+        if self.previewing or self.finished or self.zooming or self.pinching:
             return
         x, y = (px + round(self.ox)) / self.scale, (py + round(self.oy)) / self.scale
         i = self.hit(x, y)
@@ -1595,7 +1749,7 @@ class Paint:
         y = 0
         card = self.cards.get(read_last())
         if card:
-            pos = card.translate_coordinates(sections, 0, 0)
+            pos = card[0].translate_coordinates(sections, 0, 0)
             if pos:
                 y = max(0, pos[1] - 70)
         scroll.get_vadjustment().set_value(y)
@@ -2341,6 +2495,13 @@ class Paint:
         while steps[-1] * ZOOM_STEP <= MAX_ZOOM:
             steps.append(steps[-1] * ZOOM_STEP)
         return steps
+
+    def zoomed(self, scale):
+        """Fingers zoomed to scale: the zoom buttons go on from the step
+        nearest to it."""
+        steps = self.steps()
+        self.zoom = min(range(len(steps)), key=lambda k: abs(math.log(steps[k] / scale)))
+        self.forget_whole()
 
     def set_zoom(self, index, focus=None, smooth=True):
         """Zoom to a step, with focus (a spot of the picture; else the
