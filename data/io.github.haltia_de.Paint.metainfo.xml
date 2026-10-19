@@ -19,6 +19,9 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
+    <release version="4.0.2" date="2026-10-19">
+      <description><p>В обновлениях теперь видно, что нового в каждой версии Раскраски.</p></description>
+    </release>
     <release version="4.0.1" date="2026-10-19">
       <description><p>Новый значок: светлая палитра на фиолетовом.</p></description>
     </release>
