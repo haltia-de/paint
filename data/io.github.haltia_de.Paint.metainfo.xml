@@ -19,12 +19,26 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
-    <release version="4.0.1" date="2026-10-19"/>
-    <release version="4.0.0" date="2026-10-19"/>
-    <release version="3.2.1" date="2026-10-19"/>
-    <release version="3.2.0" date="2026-10-19"/>
-    <release version="3.1.0" date="2026-10-18"/>
-    <release version="3.0.1" date="2026-10-18"/>
-    <release version="3.0" date="2026-10-18"/>
+    <release version="4.0.1" date="2026-10-19">
+      <description><p>Новый значок: светлая палитра на фиолетовом.</p></description>
+    </release>
+    <release version="4.0.0" date="2026-10-19">
+      <description><p>Программа теперь входит в Haltia. Картины, прогресс и сохранённые раскраски остались на месте.</p></description>
+    </release>
+    <release version="3.2.1" date="2026-10-19">
+      <description><p>Двумя пальцами картина только приближается и отдаляется, а не сдвигается.</p></description>
+    </release>
+    <release version="3.2.0" date="2026-10-19">
+      <description><p>Картину можно приближать двумя пальцами. Палец, которым держат планшет, больше не мешает.</p></description>
+    </release>
+    <release version="3.1.0" date="2026-10-18">
+      <description><p>Галерея открывается быстрее. Кнопка «+ Добавить» берёт картинку и из своей галереи. Готовую раскраску можно сохранить в галерею.</p></description>
+    </release>
+    <release version="3.0.1" date="2026-10-18">
+      <description><p>Обновления приходят подписанными пакетами.</p></description>
+    </release>
+    <release version="3.0" date="2026-10-18">
+      <description><p>Раскраска стала отдельной программой.</p></description>
+    </release>
   </releases>
 </component>
