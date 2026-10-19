@@ -1,16 +1,20 @@
 # Maintainer: Mikhail Nevskiy <rensomail@gmail.com>
-pkgname=b8k-paint
-pkgver=3.2.1
+pkgname=haltia-paint
+pkgver=4.0.0
 pkgrel=0
 pkgdesc="Раскраска: Colour by number on paintings and prints (GTK 3)"
-url="https://github.com/trudenboy/b8k-paint"
+url="https://github.com/haltia-de/paint"
 arch="noarch"
 license="GPL-2.0-only"
-depends="python3 py3-gobject3 gtk+3.0 py3-b8k-compat py3-cairo py3-pillow py3-numpy py3-scipy"
-source="$pkgname-$pkgver.tar.gz::https://github.com/trudenboy/b8k-paint/archive/v$pkgver.tar.gz"
+# The name before ADR 0004: apk upgrade carries b8k-paint over to this.
+provides="b8k-paint=$pkgver-r$pkgrel"
+replaces="b8k-paint"
+depends="python3 py3-gobject3 gtk+3.0 py3-haltia-kit py3-cairo py3-pillow py3-numpy py3-scipy"
+source="$pkgname-$pkgver.tar.gz::https://github.com/haltia-de/paint/archive/v$pkgver.tar.gz"
+builddir="$srcdir/paint-$pkgver"
 
 check() {
-	python3 -m py_compile b8k-paint pbn.py
+	python3 -m py_compile haltia-paint pbn.py
 }
 
 package() {

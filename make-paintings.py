@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0
-"""Turn public-domain paintings into the built-in b8k-paint pictures.
+"""Turn public-domain paintings into the built-in haltia-paint pictures.
 
   make-paintings.py CACHE_DIR [SLUG...]
 
@@ -25,7 +25,7 @@ import pbn
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pictures")
 # Wikimedia asks for a User-Agent that says who is asking.
-AGENT = "b8k-paint/1.0 (https://github.com/trudenboy/lenovo-b8000h-linux)"
+AGENT = "haltia-paint/4.0 (https://github.com/haltia-de/paint)"
 
 # slug, source, name, theme, level, and optionally the part to use (x0,
 # y0, x1, y1 as fractions: no text, no book margins). The source is a

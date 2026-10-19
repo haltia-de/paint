@@ -42,11 +42,12 @@ what is there until the new tiles come, a tap paints its region into the
 tiles kept. Progress is written a moment after the last tap, and gallery
 thumbnails are kept as PNG files.
 
-It is a GTK application, io.github.trudenboy.Paint, for any desktop; on
-the b8k tablet shell the shell buzzes the touches and its GTK theme
-gives the large header and dialogs.
+It is a GTK application, io.github.haltia_de.Paint (io.github.trudenboy.Paint
+before 4.0), for any desktop; on the Haltia tablet shell the shell buzzes
+the touches and its GTK theme gives the large header and dialogs. Its
+folders were called b8k-paint before 4.0 and move on the first start.
 
-Pictures: the built-in ones in PREFIX/share/b8k-paint/, and any photo
+Pictures: the built-in ones in PREFIX/share/haltia-paint/, and any photo
 put into ~/Раскраски (JPEG or PNG), which is turned into a picture of
 about 300 regions in the background the first time the gallery sees it.
 
@@ -66,7 +67,7 @@ shows it large with its artist and year, as it will look painted at the
 chosen size of regions (a tap on it shows the painting itself). pbn.py
 makes it in a process of its own at low priority, as it takes 15 to 30
 seconds on the tablet. "Загрузить" keeps it in
-~/.local/share/b8k-paint/downloaded/, shown in its own gallery section,
+~/.local/share/haltia-paint/downloaded/, shown in its own gallery section,
 where "✕ Убрать" takes it out again. Only https requests to
 wikidata.org, commons.wikimedia.org and the Wikimedia image hosts are
 made.
@@ -92,9 +93,9 @@ import cairo
 import gi
 from gi.repository import GLib
 
-APP_ID = "io.github.trudenboy.Paint"
+APP_ID = "io.github.haltia_de.Paint"
 # Under Wayland GTK 3 names the window by the program name: the program's
-# id, as its .desktop file is named, so a desktop or the b8k shell finds it.
+# id, as its .desktop file is named, so a desktop or the Haltia shell finds it.
 GLib.set_prgname(APP_ID)
 # What a window without a title of its own (a dialog) is called.
 GLib.set_application_name("Раскраска")
@@ -103,25 +104,25 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("GLibUnix", "2.0")
 gi.require_version("GdkPixbuf", "2.0")
-from b8k_compat import dialogs  # noqa: E402
+from haltia_kit import dialogs, paths  # noqa: E402
 from gi.repository import Gdk, GdkPixbuf, Gio, GLibUnix, Gtk, Pango  # noqa: E402
 
-# Installed as PREFIX/bin/b8k-paint: the pictures are in
-# PREFIX/share/b8k-paint, the generator in PREFIX/lib/b8k-paint; in a
+# Installed as PREFIX/bin/haltia-paint: the pictures are in
+# PREFIX/share/haltia-paint, the generator in PREFIX/lib/haltia-paint; in a
 # checkout both are beside the program.
 HERE = os.path.dirname(os.path.realpath(__file__))
 PREFIX = os.path.dirname(HERE)
 BUILTIN = next((d for d in (os.path.join(HERE, "pictures"),
-                            os.path.join(PREFIX, "share", "b8k-paint"))
-                if os.path.isdir(d)), os.path.join(PREFIX, "share", "b8k-paint"))
+                            os.path.join(PREFIX, "share", "haltia-paint"))
+                if os.path.isdir(d)), os.path.join(PREFIX, "share", "haltia-paint"))
 PHOTOS = os.path.expanduser("~/Раскраски")
-DATA = os.path.expanduser("~/.local/share/b8k-paint")
+DATA = os.path.join(GLib.get_user_data_dir(), "haltia-paint")
 DOWNLOADED = os.path.join(DATA, "downloaded")
 # Pictures being made, for the search's preview.
 WORK = os.path.join(DATA, "work")
 PBN = next((p for p in (os.path.join(HERE, "pbn.py"),
-                        os.path.join(PREFIX, "lib", "b8k-paint", "pbn.py"))
-            if os.path.exists(p)), os.path.join(PREFIX, "lib", "b8k-paint", "pbn.py"))
+                        os.path.join(PREFIX, "lib", "haltia-paint", "pbn.py"))
+            if os.path.exists(p)), os.path.join(PREFIX, "lib", "haltia-paint", "pbn.py"))
 # Gallery sections, easier further up: a level, or a theme that has a
 # section of its own (its pictures then show there, whatever the level).
 SECTIONS = (
@@ -164,7 +165,7 @@ WIKIDATA = "https://www.wikidata.org/w/api.php"
 COMMONS = "https://commons.wikimedia.org/w/api.php"
 IMAGE_HOSTS = ("upload.wikimedia.org", "thumb.wikimedia.org")
 # Wikimedia asks for a User-Agent that says who is asking.
-AGENT = "b8k-paint/1.0 (https://github.com/trudenboy/lenovo-b8000h-linux)"
+AGENT = "haltia-paint/4.0 (https://github.com/haltia-de/paint)"
 PAGE = 24
 # Thumbnail widths Wikimedia keeps ready: 330 for the results, 960 for
 # the large view and the conversion.
@@ -317,10 +318,10 @@ def make_picture(source, out, level, meta):
                              stderr=subprocess.PIPE, timeout=600,
                              preexec_fn=lambda: os.nice(10))
     except (OSError, subprocess.SubprocessError) as exc:
-        sys.stderr.write("b8k-paint: %s: %s\n" % (source, exc))
+        sys.stderr.write("haltia-paint: %s: %s\n" % (source, exc))
         return False
     if run.returncode:
-        sys.stderr.write("b8k-paint: %s: %s\n" % (source, run.stderr.decode(errors="replace")[-500:]))
+        sys.stderr.write("haltia-paint: %s: %s\n" % (source, run.stderr.decode(errors="replace")[-500:]))
         return False
     return True
 
@@ -1244,7 +1245,7 @@ class Board(Gtk.DrawingArea):
                 image = (self.draw_base(filled) if key is None
                          else self.draw_tile(scale, key, filled, chosen))
             except Exception as exc:  # a drawing must not stop the thread
-                sys.stderr.write("b8k-paint: tile %s: %s\n" % (key, exc))
+                sys.stderr.write("haltia-paint: tile %s: %s\n" % (key, exc))
                 continue
             GLib.idle_add(self.tile_ready, zooms, scale, key, chosen, image, version)
 
@@ -1598,7 +1599,7 @@ class Workers:
             try:
                 fn(*args)
             except Exception as exc:  # one job must not stop the thread
-                sys.stderr.write("b8k-paint: %s\n" % exc)
+                sys.stderr.write("haltia-paint: %s\n" % exc)
 
 
 # --- the program ------------------------------------------------------------
@@ -1864,7 +1865,7 @@ class Paint:
         try:
             image = thumbnail(pic, filled, finished)
         except Exception as exc:  # a broken file must not stop the thread
-            sys.stderr.write("b8k-paint: %s: %s\n" % (pic["id"], exc))
+            sys.stderr.write("haltia-paint: %s: %s\n" % (pic["id"], exc))
             return
 
         def show():
@@ -1923,7 +1924,7 @@ class Paint:
         self.back_button.show()
         self.find_button.hide()
         if self.stack.get_child_by_name("photos") is None:
-            from b8k_compat import photos  # its thumbnails: only now
+            from haltia_kit import photos  # its thumbnails: only now
             self.photo_thumbs = photos.Thumbs()
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
             for side in ("start", "end", "top"):
@@ -1973,7 +1974,7 @@ class Paint:
                 data = fh.read()
             large = pixbuf_of(data, 640, 520)
         except (OSError, GLib.Error) as exc:
-            sys.stderr.write("b8k-paint: %s: %s\n" % (path, exc))
+            sys.stderr.write("haltia-paint: %s: %s\n" % (path, exc))
             dialogs.info(self.win, "Эту картинку не открыть.")
             return
         st = os.stat(path)
@@ -2097,7 +2098,7 @@ class Paint:
         self.topics.hide()
         self.search_query, self.search_next = query, more
         if err:
-            sys.stderr.write("b8k-paint: search: %s\n" % err)
+            sys.stderr.write("haltia-paint: search: %s\n" % err)
             self.search_note.set_text("Нет связи с Википедией, попробуйте позже")
         elif not found and offset == 0:
             self.search_note.set_text("Ничего не нашлось. Попробуйте другое слово, "
@@ -2230,7 +2231,7 @@ class Paint:
             data = fetch_image(url)
             pb = pixbuf_of(data, 640, 520)
         except Exception as exc:
-            sys.stderr.write("b8k-paint: %s: %s\n" % (item["file"], exc))
+            sys.stderr.write("haltia-paint: %s: %s\n" % (item["file"], exc))
             data = pb = licence = None
         GLib.idle_add(self.preview_loaded, item, data, pb, licence)
 
@@ -2260,7 +2261,7 @@ class Paint:
                 with open(source, "wb") as fh:
                     fh.write(item["data"])
             except OSError as exc:
-                sys.stderr.write("b8k-paint: %s: %s\n" % (WORK, exc))
+                sys.stderr.write("haltia-paint: %s: %s\n" % (WORK, exc))
                 source = None
             while True:
                 level = self.grade[0]
@@ -2362,7 +2363,7 @@ class Paint:
                 shutil.copyfile(item["pics"][level]["path"], path + ".new")
                 os.replace(path + ".new", path)
             except OSError as exc:
-                sys.stderr.write("b8k-paint: %s: %s\n" % (path, exc))
+                sys.stderr.write("haltia-paint: %s: %s\n" % (path, exc))
                 self.preview_note.set_text("Не удалось сохранить")
                 return
             self.gallery_stale = True
@@ -2619,7 +2620,7 @@ class Paint:
                 text = "Сохранено в галерею:\n%s" % os.path.join(os.path.basename(folder),
                                                                  os.path.basename(path))
             except (OSError, cairo.Error) as exc:
-                sys.stderr.write("b8k-paint: %s: %s\n" % (folder, exc))
+                sys.stderr.write("haltia-paint: %s: %s\n" % (folder, exc))
                 text = "Не удалось сохранить."
             GLib.idle_add(lambda: dialogs.info(self.win, text) and False)
 
@@ -2674,6 +2675,9 @@ class App(Gtk.Application):
 def main():
     # --open ID goes straight to one picture (for testing).
     open_id = sys.argv[2] if sys.argv[1:2] == ["--open"] and len(sys.argv) > 2 else None
+    # The folders of versions before 4.0, b8k-paint: the pictures made,
+    # the progress and the thumbnails move to the new name once.
+    paths.migrate_dirs("b8k-paint", "haltia-paint")
     return App(open_id).run(sys.argv[:1])
 
 

@@ -1,19 +1,20 @@
 # Раскраска
 
-Раскраска по номерам на известных картинах (`b8k-paint`), сделанная для
-пожилого человека: крупные клетки и кнопки, без таймера, очков и рекламы.
+Раскраска по номерам на известных картинах (`haltia-paint`), сделанная для
+пожилого человека: без таймера, очков и рекламы.
 
 - Картина разбита на области с номерами, как в Happy Color и Daily Coloring;
-  внизу палитра крупных кнопок. Выбрал цвет, нажал на область — она
+  внизу палитра. Выбрал цвет, нажал на область — она
   закрашена. Нажатие чуть мимо маленькой области нужного номера тоже
   считается.
-- Справа кнопки: крупнее, мельче, вся картина, «где?» (ближайшая незакрашенная
+- Справа кнопки: приблизить, отдалить, вся картина, «где?» (ближайшая незакрашенная
   область выбранного цвета), отмена, «посмотреть» готовую картину.
-- Прогресс сохраняется после каждого нажатия в `~/.local/share/b8k-paint/`.
+- Прогресс сохраняется после каждого нажатия в `~/.local/share/haltia-paint/`
+  (до версии 4.0 — `b8k-paint`, папка переносится при первом запуске).
 - Готовую картину можно сохранить в галерею: `Изображения/Мои раскраски`.
-- Обычная GTK-программа `io.github.trudenboy.Paint` для любого рабочего
-  стола; на планшете оболочка b8k даёт ей вибрацию касаний, крупную шапку и
-  диалоги своей темой GTK.
+- Обычная GTK-программа `io.github.haltia_de.Paint` (до версии 4.0 —
+  `io.github.trudenboy.Paint`) для любого рабочего стола; на планшете
+  оболочка Haltia даёт ей вибрацию касаний, шапку и диалоги своей темой GTK.
 - 37 встроенных картин в общественном достоянии (Айвазовский, Шишкин,
   Левитан, Куинджи, Хокусай, Ван Гог и другие), около 300 и около 600
   областей; `make-paintings.py` делает их из файлов Wikimedia Commons.
@@ -41,11 +42,11 @@ python3 make-paintings.py CACHE_DIR [slug...]           # встроенные �
 ## Установка
 
 Нужны Python 3, GTK 3, PyGObject, pycairo, Pillow,
-[b8k-compat](https://github.com/trudenboy/b8k-compat), а для своих фотографий
+[haltia-kit](https://github.com/haltia-de/kit), а для своих фотографий
 и «+ Добавить» ещё numpy и scipy. В Alpine:
 
 ```
-apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy py3-b8k-compat
+apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy py3-haltia-kit
 ```
 
 Пакет для Alpine: `packaging/alpine/APKBUILD`.
@@ -58,19 +59,23 @@ sh install.sh /mnt/root       # в другой корень, например �
 sh install.sh "$pkgdir" /usr  # с префиксом /usr, как в пакете
 ```
 
-`install.sh [ROOT] [PREFIX]` кладёт программу в `PREFIX/bin/b8k-paint`,
-генератор в `PREFIX/lib/b8k-paint/pbn.py`, картины в `PREFIX/share/b8k-paint/`,
-`.desktop`-файл, значок hicolor и metainfo; старый раздел оболочки
-(`/usr/local/share/b8k/apps.d/paint.conf`) и картины версии 2 убирает.
+`install.sh [ROOT] [PREFIX]` кладёт программу в `PREFIX/bin/haltia-paint`,
+генератор в `PREFIX/lib/haltia-paint/pbn.py`, картины в
+`PREFIX/share/haltia-paint/`, `.desktop`-файл, значок hicolor и metainfo.
+Прежние имена до версии 5.0 остаются: команда `b8k-paint` — ссылка на
+`haltia-paint`, скрытый `io.github.trudenboy.Paint.desktop`. Старый раздел
+оболочки (`/usr/local/share/b8k/apps.d/paint.conf`) и картины версии 2
+убирает.
 
 ## Оболочка планшета
 
 Программа сделана для оболочки
-[lenovo-b8000h-linux](https://github.com/trudenboy/lenovo-b8000h-linux)
+[device-lenovo-b8000h](https://github.com/haltia-de/device-lenovo-b8000h)
 (Linux на Lenovo YOGA Tablet 10 B8000-H), её сборка ставит программу
 отсюда по тегу. С оболочкой она связана только стандартами freedesktop:
-`.desktop`-файл с `X-B8K-Home=true` и `X-B8K-Replaces=paint` выводит её на
-домашний экран вместо прежней кнопки. Без оболочки работает на любом
+`.desktop`-файл с `X-B8K-Home=true` и `X-B8K-Replaces` (прежние id `paint` и
+`io.github.trudenboy.Paint`) выводит её на домашний экран вместо прежней
+кнопки. Без оболочки работает на любом
 рабочем столе с GTK 3.
 
 ## Лицензия

@@ -10,7 +10,7 @@ with data-n, its colour number counted from 1, light to dark, and
 data-label "x y r", the point furthest from its edge and that distance,
 where its number goes. The root carries data-palette, data-count (of
 regions) and, from --set,
-what b8k-paint shows: data-name, data-theme, data-level.
+what haltia-paint shows: data-name, data-theme, data-level.
 
 The steps follow drake7707/paintbynumbersgenerator (MIT):
 - brighten the old varnish, shrink, smooth, reduce to a few colours
