@@ -34,7 +34,9 @@ PyGObject, pycairo, Pillow; `pbn.py` also needs numpy and scipy (Alpine:
 `apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy`); exact tested versions for a
 Flatpak in `requirements.txt`). Nothing may hard-code `/usr`: everything
 is found from the program's own place (a Flatpak has `/app`). Own pictures come only
-from XDG Pictures, `~/Раскраски` and `Gtk.FileChooserNative` (no walking `/media`).
+from XDG Pictures (photos to make into pictures in `Pictures/Раскраски`, moved
+from `~/Раскраски` by `move_photos()` with their ids) and `Gtk.FileChooserNative`
+(no walking `/media`).
 
 ```
 PYTHONPATH=../b8k-compat ./haltia-paint   # run from the checkout (pictures/ and pbn.py beside it)

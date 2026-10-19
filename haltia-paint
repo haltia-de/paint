@@ -48,7 +48,8 @@ the touches and its GTK theme gives the large header and dialogs. Its
 folders were called b8k-paint before 4.0 and move on the first start.
 
 Pictures: the built-in ones in PREFIX/share/haltia-paint/, and any photo
-put into ~/Раскраски (JPEG or PNG), which is turned into a picture of
+put into Изображения/Раскраски (JPEG or PNG; ~/Раскраски before 4.1,
+moved there on the first start), which is turned into a picture of
 about 300 regions in the background the first time the gallery sees it.
 
 The gallery is built once and kept: closing a picture redraws only its
@@ -116,7 +117,14 @@ PREFIX = os.path.dirname(HERE)
 BUILTIN = next((d for d in (os.path.join(HERE, "pictures"),
                             os.path.join(PREFIX, "share", "haltia-paint"))
                 if os.path.isdir(d)), os.path.join(PREFIX, "share", "haltia-paint"))
-PHOTOS = os.path.expanduser("~/Раскраски")
+# Photos to make into pictures: Изображения/Раскраски (in a Flatpak only
+# the Pictures folder is reached); before 4.1 it was ~/Раскраски.
+PICTURES = (GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES)
+            or os.path.expanduser("~/Pictures"))
+PHOTOS = os.path.join(PICTURES, "Раскраски")
+OLD_PHOTOS = os.path.expanduser("~/Раскраски")
+# Where "Сохранить в галерею" puts a finished picture.
+SAVED = os.path.join(PICTURES, "Мои раскраски")
 DATA = os.path.join(GLib.get_user_data_dir(), "haltia-paint")
 DOWNLOADED = os.path.join(DATA, "downloaded")
 # Pictures being made, for the search's preview.
@@ -607,6 +615,38 @@ def load_pictures():
                     found.append(pic)
     heads(save=True)
     return found, waiting
+
+
+def move_photos():
+    """~/Раскраски of versions before 4.1 into Изображения/Раскраски,
+    once, with the pictures made of its photos and their progress (a
+    photo's id comes from its path). A link is left at the old place."""
+    if (not os.path.isdir(OLD_PHOTOS) or os.path.islink(OLD_PHOTOS)
+            or os.path.lexists(PHOTOS)):
+        return
+    try:
+        old = {f: photo_path(os.path.join(OLD_PHOTOS, f)) for f in os.listdir(OLD_PHOTOS)
+               if os.path.isfile(os.path.join(OLD_PHOTOS, f))}
+        os.makedirs(PICTURES, exist_ok=True)
+        shutil.move(OLD_PHOTOS, PHOTOS)
+        os.symlink(PHOTOS, OLD_PHOTOS)
+    except OSError as exc:
+        sys.stderr.write("haltia-paint: %s: %s\n" % (OLD_PHOTOS, exc))
+        return
+    for f, (old_id, old_file) in old.items():
+        try:
+            new_id, new_file = photo_path(os.path.join(PHOTOS, f))
+        except OSError:
+            continue
+        for a, b in ((old_file, new_file),
+                     (progress_path({"id": old_id}), progress_path({"id": new_id})),
+                     (os.path.join(DATA, "thumbs", old_id + ".png"),
+                      os.path.join(DATA, "thumbs", new_id + ".png"))):
+            try:
+                if os.path.exists(a) and not os.path.exists(b):
+                    os.replace(a, b)
+            except OSError:
+                pass
 
 
 def progress_path(pic):
@@ -1554,11 +1594,6 @@ class Board(Gtk.DrawingArea):
 IMAGE_TYPES = (".jpg", ".jpeg", ".png", ".webp")
 
 
-def pictures_dir():
-    return (GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES)
-            or os.path.expanduser("~/Pictures"))
-
-
 def picked():
     """The pictures chosen through the file chooser, last first (a
     Flatpak's portal gives them paths of their own)."""
@@ -1584,11 +1619,14 @@ def find_photos(limit=400):
     (Изображения), newest first. Nothing else is walked: other places are
     reached through the file chooser, which in a Flatpak is the only way."""
     found = []
-    root = pictures_dir()
+    root = PICTURES
     if os.path.isdir(root):
         depth = root.rstrip("/").count("/")
         for top, dirs, files in os.walk(root):
+            # Not this program's own folders: their photos are in the
+            # gallery already, and the finished pictures are its own.
             dirs[:] = [d for d in dirs if not d.startswith(".")
+                       and os.path.join(top, d) not in (PHOTOS, SAVED)
                        and top.count("/") - depth < 4]
             for f in files:
                 if f.lower().endswith(IMAGE_TYPES):
@@ -2007,8 +2045,8 @@ class Paint:
         for kind in ("image/jpeg", "image/png", "image/webp"):
             kinds.add_mime_type(kind)
         chooser.add_filter(kinds)
-        if os.path.isdir(pictures_dir()):
-            chooser.set_current_folder(pictures_dir())
+        if os.path.isdir(PICTURES):
+            chooser.set_current_folder(PICTURES)
         chooser.connect("response", self.file_chosen)
         self.chooser = chooser  # kept while it is shown
         chooser.show()
@@ -2659,8 +2697,7 @@ class Paint:
     def save_to_gallery(self, pic):
         """The finished picture as a PNG among the pictures (Галерея shows
         it), drawn in a thread: a large one takes a few seconds."""
-        folder = os.path.join(GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES)
-                              or os.path.expanduser("~/Pictures"), "Мои раскраски")
+        folder = SAVED
         name = re.sub(r'[/\\:*?"<>|]', " ", pic["name"]).strip() or "Раскраска"
 
         def work():
@@ -2728,6 +2765,7 @@ class App(Gtk.Application):
         provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        move_photos()
         try:
             os.makedirs(PHOTOS, exist_ok=True)
         except OSError:  # a sandbox without the home folder
