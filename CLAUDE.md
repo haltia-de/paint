@@ -120,6 +120,11 @@ answers 429 when downloading many files; `make-paintings.py` retries.
 - Commit messages: `haltia-paint: <short sentence>.` style (`b8k-paint:` before 4.0).
 - Files carry `SPDX-License-Identifier: GPL-2.0`; LF line endings
   (`.gitattributes`).
-- Every `<release>` in the metainfo carries a short `<description>` in
-  Russian (`<p>`, or `<ul><li>`) saying what the person will notice:
-  haltia-update shows it as «Что нового» before installing.
+- Every `<release>` in the metainfo carries a short `<description>` saying
+  what the person will notice: since 4.1.3 in English with a Russian
+  `xml:lang="ru"` twin (before, Russian only); haltia-update shows it as
+  «Что нового» before installing. `debian/changelog` gets each version too
+  (CI checks it equals the tag).
+- Inside the Haltia shell (`ON_HALTIA`, from `XDG_CURRENT_DESKTOP`) the
+  header has no close button, the shell's ✕ covers it; elsewhere it shows
+  the desktop's buttons.

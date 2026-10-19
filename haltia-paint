@@ -44,8 +44,9 @@ thumbnails are kept as PNG files.
 
 It is a GTK application, io.github.haltia_de.Paint (io.github.trudenboy.Paint
 before 4.0), for any desktop; on the Haltia tablet shell the shell buzzes
-the touches and its GTK theme gives the large header and dialogs. Its
-folders were called b8k-paint before 4.0 and move on the first start.
+the touches and its GTK theme gives the large header and dialogs, and it
+closes the program with its own ✕; elsewhere the header has the desktop's
+window buttons. Its folders were called b8k-paint before 4.0 and move on the first start.
 
 Pictures: the built-in ones in PREFIX/share/haltia-paint/, and any photo
 put into Изображения/Раскраски (JPEG or PNG; ~/Раскраски before 4.1,
@@ -101,6 +102,8 @@ APP_ID = "io.github.haltia_de.Paint"
 GLib.set_prgname(APP_ID)
 # What a window without a title of its own (a dialog) is called.
 GLib.set_application_name("Раскраска")
+# Inside the Haltia shell (its session sets XDG_CURRENT_DESKTOP=Haltia:GNOME).
+ON_HALTIA = "Haltia" in os.environ.get("XDG_CURRENT_DESKTOP", "").split(":")
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
@@ -1688,6 +1691,9 @@ class Paint:
         self.find_button.connect("clicked", lambda _b: self.add_picture())
         self.find_button.set_no_show_all(True)
         header.pack_end(self.find_button)
+        # The shell closes a program with its own ✕; elsewhere the window
+        # has the desktop's buttons (its decoration-layout).
+        header.set_show_close_button(not ON_HALTIA)
         self.win.set_titlebar(header)
         self.win.connect("destroy", self.quit)
         # Progress is written a moment after a tap; write it on the way out.
