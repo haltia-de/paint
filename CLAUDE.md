@@ -31,7 +31,10 @@ edit the lenovo repo; tell its session the new tag.
 There is no build or test suite (`uvx pyflakes haltia-paint pbn.py
 make-paintings.py` is a quick check). Requirements: Python 3, GTK 3,
 PyGObject, pycairo, Pillow; `pbn.py` also needs numpy and scipy (Alpine:
-`apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy`).
+`apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy`); exact tested versions for a
+Flatpak in `requirements.txt`). Nothing may hard-code `/usr`: everything
+is found from the program's own place (a Flatpak has `/app`). Own pictures come only
+from XDG Pictures, `~/Раскраски` and `Gtk.FileChooserNative` (no walking `/media`).
 
 ```
 PYTHONPATH=../b8k-compat ./haltia-paint   # run from the checkout (pictures/ and pbn.py beside it)

@@ -55,9 +55,10 @@ The gallery is built once and kept: closing a picture redraws only its
 card; the first screenful shows at once and the other cards come while
 it is already in use, their thumbnails drawn in a thread.
 
-New pictures: "+ Добавить" in the gallery header offers a picture from
-the tablet's own (the pictures, downloads and camera folders and memory
-cards, newest first, as Галерея finds them) or a search: it searches
+New pictures: "+ Добавить" in the gallery header offers a picture of
+one's own (those in the Pictures folder, Изображения, newest first, and
+"Другая папка…": the desktop's file chooser, the portal in a Flatpak;
+what was chosen there comes first next time) or a search: it searches
 Wikidata for
 paintings (items that are an instance of painting and have an image), by
 artist, title or what is painted, in Russian as well; the pictures
@@ -1550,35 +1551,55 @@ class Board(Gtk.DrawingArea):
         self.app.region_painted(number)
 
 
+IMAGE_TYPES = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def pictures_dir():
+    return (GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES)
+            or os.path.expanduser("~/Pictures"))
+
+
+def picked():
+    """The pictures chosen through the file chooser, last first (a
+    Flatpak's portal gives them paths of their own)."""
+    try:
+        with open(os.path.join(DATA, "picked.json")) as fh:
+            return [p for p in json.load(fh) if isinstance(p, str)]
+    except (OSError, ValueError):
+        return []
+
+
+def remember_picked(path):
+    paths = [path] + [p for p in picked() if p != path]
+    try:
+        os.makedirs(DATA, exist_ok=True)
+        with open(os.path.join(DATA, "picked.json"), "w") as fh:
+            json.dump(paths[:40], fh, ensure_ascii=False)
+    except OSError:
+        pass
+
+
 def find_photos(limit=400):
-    """Photos and pictures on the tablet, newest first: the pictures,
-    downloads and camera folders and the memory cards, as Галерея finds
-    them (not this program's own files)."""
-    home = os.path.expanduser("~")
-    roots = [GLib.get_user_special_dir(d) for d in (GLib.UserDirectory.DIRECTORY_PICTURES,
-                                                     GLib.UserDirectory.DIRECTORY_DOWNLOAD,
-                                                     GLib.UserDirectory.DIRECTORY_DOCUMENTS)]
-    roots += [os.path.join(home, d) for d in ("DCIM", "Camera", "Pictures", "Downloads")]
-    roots += [os.path.join(base, d) for base in ("/media", "/run/media/" + os.environ.get("USER", ""))
-              if os.path.isdir(base) for d in os.listdir(base)]
-    found, seen = [], set()
-    for root in roots:
-        if not root or not os.path.isdir(root) or os.path.realpath(root) in seen:
-            continue
-        seen.add(os.path.realpath(root))
+    """The pictures chosen before, then those in the Pictures folder
+    (Изображения), newest first. Nothing else is walked: other places are
+    reached through the file chooser, which in a Flatpak is the only way."""
+    found = []
+    root = pictures_dir()
+    if os.path.isdir(root):
         depth = root.rstrip("/").count("/")
         for top, dirs, files in os.walk(root):
             dirs[:] = [d for d in dirs if not d.startswith(".")
                        and top.count("/") - depth < 4]
             for f in files:
-                if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                if f.lower().endswith(IMAGE_TYPES):
                     path = os.path.join(top, f)
                     try:
                         found.append((os.path.getmtime(path), path))
                     except OSError:
                         pass
     found.sort(reverse=True)
-    return [p for _t, p in found[:limit]]
+    chosen = [p for p in picked() if os.path.isfile(p)]
+    return chosen + [p for _t, p in found[:limit] if p not in chosen]
 
 
 class Workers:
@@ -1929,9 +1950,15 @@ class Paint:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
             for side in ("start", "end", "top"):
                 getattr(box, "set_margin_" + side)(16)
+            top = Gtk.Box(spacing=16)
             self.photos_note = Gtk.Label(label="Ищу фотографии…", xalign=0)
             self.photos_note.get_style_context().add_class("note")
-            box.pack_start(self.photos_note, False, False, 0)
+            top.pack_start(self.photos_note, True, True, 0)
+            other = Gtk.Button(label="Другая папка…")
+            other.get_style_context().add_class("reset")
+            other.connect("clicked", lambda _b: self.choose_file())
+            top.pack_end(other, False, False, 0)
+            box.pack_start(top, False, False, 0)
             self.photo_grid = Gtk.FlowBox()
             self.photo_grid.set_selection_mode(Gtk.SelectionMode.NONE)
             self.photo_grid.set_homogeneous(True)
@@ -1953,18 +1980,51 @@ class Paint:
 
     def photos_found(self, paths):
         self.photos_note.set_text("Нажмите на фотографию или картинку" if paths
-                                  else "В галерее нет фотографий")
+                                  else "В «Изображениях» нет картинок")
+        self.photo_paths = list(paths)
         for path in paths:
-            image = Gtk.Image()
-            image.set_size_request(220, 220)
-            self.photo_thumbs.want(path, image, 220)
-            button = Gtk.Button()
-            button.get_style_context().add_class("card")
-            button.add(image)
-            button.connect("clicked", lambda _b, p=path: self.photo_chosen(p))
-            self.photo_grid.add(button)
+            self.photo_grid.add(self.photo_card(path))
         self.photo_grid.show_all()
         return False
+
+    def photo_card(self, path):
+        image = Gtk.Image()
+        image.set_size_request(220, 220)
+        self.photo_thumbs.want(path, image, 220)
+        button = Gtk.Button()
+        button.get_style_context().add_class("card")
+        button.add(image)
+        button.connect("clicked", lambda _b: self.photo_chosen(path))
+        return button
+
+    def choose_file(self):
+        """A picture from anywhere, through the desktop's own file chooser
+        (the portal in a Flatpak or KDE, GTK's dialog elsewhere)."""
+        chooser = Gtk.FileChooserNative.new("Выбрать картинку", self.win,
+                                            Gtk.FileChooserAction.OPEN, "Выбрать", "Отмена")
+        kinds = Gtk.FileFilter()
+        kinds.set_name("Картинки")
+        for kind in ("image/jpeg", "image/png", "image/webp"):
+            kinds.add_mime_type(kind)
+        chooser.add_filter(kinds)
+        if os.path.isdir(pictures_dir()):
+            chooser.set_current_folder(pictures_dir())
+        chooser.connect("response", self.file_chosen)
+        self.chooser = chooser  # kept while it is shown
+        chooser.show()
+
+    def file_chosen(self, chooser, response):
+        path = chooser.get_filename() if response == Gtk.ResponseType.ACCEPT else None
+        self.chooser = None
+        if not path:
+            return
+        remember_picked(path)
+        if path not in getattr(self, "photo_paths", [path]):
+            self.photo_paths.insert(0, path)
+            card = self.photo_card(path)
+            self.photo_grid.insert(card, 0)
+            card.show_all()
+        self.photo_chosen(path)
 
     def photo_chosen(self, path):
         try:
@@ -2668,7 +2728,10 @@ class App(Gtk.Application):
         provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        os.makedirs(PHOTOS, exist_ok=True)
+        try:
+            os.makedirs(PHOTOS, exist_ok=True)
+        except OSError:  # a sandbox without the home folder
+            pass
         self.paint = Paint(self, self.open_id)
 
 

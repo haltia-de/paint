@@ -1,0 +1,7 @@
+# The Python packages Раскраска needs beyond PyGObject (GTK 3) and
+# haltia-kit, at the versions it runs with on the tablet (Alpine 3.24);
+# for a Flatpak, where they come as wheels. numpy and scipy are for pbn.py.
+numpy==2.4.6
+scipy==1.17.1
+Pillow==12.2.0
+pycairo==1.28.0
