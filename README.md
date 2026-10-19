@@ -14,7 +14,9 @@
 - Готовую картину можно сохранить в галерею: `Изображения/Мои раскраски`.
 - Обычная GTK-программа `io.github.haltia_de.Paint` (до версии 4.0 —
   `io.github.trudenboy.Paint`) для любого рабочего стола; на планшете
-  оболочка Haltia даёт ей вибрацию касаний, шапку и диалоги своей темой GTK.
+  оболочка Haltia даёт ей вибрацию касаний, шапку и диалоги своей темой GTK
+  и закрывает её своим ✕, а вне оболочки у окна обычные кнопки рабочего
+  стола, среди них «Закрыть».
 - 37 встроенных картин в общественном достоянии (Айвазовский, Шишкин,
   Левитан, Куинджи, Хокусай, Ван Гог и другие), около 300 и около 600
   областей; `make-paintings.py` делает их из файлов Wikimedia Commons.
@@ -43,28 +45,42 @@ python3 make-paintings.py CACHE_DIR [slug...]           # встроенные �
 
 ## Установка
 
-Нужны Python 3, GTK 3, PyGObject, pycairo, Pillow,
-[haltia-kit](https://github.com/haltia-de/kit), а для своих фотографий
-и «+ Добавить» ещё numpy и scipy. В Alpine:
+**Ubuntu 24.04, Debian 13** (и elementary OS 8, Linux Mint 22) — из
+репозитория apt Haltia:
+
+```
+sudo curl -fsSLo /usr/share/keyrings/haltia-archive-keyring.gpg https://haltia-de.github.io/packages/apt/haltia-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/haltia-archive-keyring.gpg] https://haltia-de.github.io/packages/apt $(. /etc/os-release; echo $VERSION_CODENAME) main" | sudo tee /etc/apt/sources.list.d/haltia.list
+sudo apt update && sudo apt install haltia-paint
+```
+
+**Flatpak** (любой дистрибутив; среда GNOME — с Flathub):
+
+```
+flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak remote-add --if-not-exists haltia https://haltia-de.github.io/packages/flatpak/haltia.flatpakrepo
+flatpak install haltia io.github.haltia_de.Paint
+```
+
+В Flatpak программа видит только «Изображения»: свои фотографии кладите в
+`Изображения/Раскраски`, готовые картины сохраняются в
+`Изображения/Мои раскраски`; картинку из другой папки можно открыть через
+«+ Добавить» → «Взять из галереи» → «Другая папка…». Прогресс лежит в
+`~/.var/app/io.github.haltia_de.Paint/data/haltia-paint/`.
+
+**Alpine и postmarketOS** — пакет `haltia-paint` из
+[репозитория apk Haltia](https://github.com/haltia-de/packages).
+
+**Из исходников:** нужны Python 3, GTK 3, PyGObject, pycairo, Pillow,
+[haltia-kit](https://github.com/haltia-de/kit), а для своих фотографий и
+«+ Добавить» ещё numpy и scipy. В Alpine:
 
 ```
 apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy py3-haltia-kit
 ```
 
 Проверенные версии пакетов Python (для Flatpak, где они ставятся колёсами)
-— в `requirements.txt`.
-
-Пакеты:
-
-- Alpine: `packaging/alpine/APKBUILD`;
-- Debian и Ubuntu: `debian/` (`dpkg-buildpackage -b`), нужен пакет
-  `python3-haltia-kit`;
-- Flatpak (GNOME 51):
-  `flatpak-builder --user --install build packaging/flatpak/io.github.haltia_de.Paint.yml`.
-  Программа видит только «Изображения» (свои фотографии и готовые
-  картины), картинку из другой папки открывает через выбор файла.
-
-Поставить в систему (нужен root):
+— в `requirements.txt`. Поставить в систему (нужен root):
 
 ```
 sh install.sh                 # в /usr/local
@@ -79,6 +95,9 @@ sh install.sh "$pkgdir" /usr  # с префиксом /usr, как в пакет
 `haltia-paint`, скрытый `io.github.trudenboy.Paint.desktop`. Старый раздел
 оболочки (`/usr/local/share/b8k/apps.d/paint.conf`) и картины версии 2
 убирает.
+
+Сборка пакетов: `packaging/alpine/APKBUILD`, `debian/` и
+`packaging/flatpak/`, выпуск по тегу — `haltia-de/ci`.
 
 ## Оболочка планшета
 
