@@ -32,7 +32,9 @@ There is no build or test suite (`uvx pyflakes haltia-paint pbn.py
 make-paintings.py` is a quick check). Requirements: Python 3, GTK 3,
 PyGObject, pycairo, Pillow; `pbn.py` also needs numpy and scipy (Alpine:
 `apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy`); exact tested versions for a
-Flatpak in `requirements.txt`). Nothing may hard-code `/usr`: everything
+Flatpak in `requirements.txt`). No path is built from `~` (`expanduser`): in a Flatpak the home folder
+is there but unreadable, so folders come from `GLib.get_user_*_dir()` and
+`get_user_special_dir()`. Nothing may hard-code `/usr`: everything
 is found from the program's own place (a Flatpak has `/app`). Own pictures come only
 from XDG Pictures (photos to make into pictures in `Pictures/Раскраски`, moved
 from `~/Раскраски` by `move_photos()` with their ids) and `Gtk.FileChooserNative`

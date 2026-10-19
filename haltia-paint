@@ -118,11 +118,13 @@ BUILTIN = next((d for d in (os.path.join(HERE, "pictures"),
                             os.path.join(PREFIX, "share", "haltia-paint"))
                 if os.path.isdir(d)), os.path.join(PREFIX, "share", "haltia-paint"))
 # Photos to make into pictures: Изображения/Раскраски (in a Flatpak only
-# the Pictures folder is reached); before 4.1 it was ~/Раскраски.
+# the Pictures folder is reached; the home folder is there but cannot be
+# read, so every path comes from GLib); before 4.1 it was ~/Раскраски.
+# ~/Pictures only when no Pictures folder is set at all.
 PICTURES = (GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES)
-            or os.path.expanduser("~/Pictures"))
+            or os.path.join(GLib.get_home_dir(), "Pictures"))
 PHOTOS = os.path.join(PICTURES, "Раскраски")
-OLD_PHOTOS = os.path.expanduser("~/Раскраски")
+OLD_PHOTOS = os.path.join(GLib.get_home_dir(), "Раскраски")
 # Where "Сохранить в галерею" puts a finished picture.
 SAVED = os.path.join(PICTURES, "Мои раскраски")
 DATA = os.path.join(GLib.get_user_data_dir(), "haltia-paint")
