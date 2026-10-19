@@ -19,6 +19,9 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
+    <release version="4.1.2" date="2026-10-19">
+      <description><p>Раскраску теперь можно поставить и на обычный компьютер с Linux: есть пакеты для Debian, Ubuntu и Flatpak. На планшете ничего не меняется.</p></description>
+    </release>
     <release version="4.1.1" date="2026-10-19">
       <description><p>Подготовка к установке на обычные компьютеры: папки находятся стандартным способом. На планшете ничего не меняется.</p></description>
     </release>

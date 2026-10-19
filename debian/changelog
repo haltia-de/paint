@@ -1,3 +1,9 @@
+haltia-paint (4.1.2) unstable; urgency=medium
+
+  * The release builds the Debian, Ubuntu and Flatpak packages too.
+
+ -- Haltia <rensomail@gmail.com>  Mon, 19 Oct 2026 21:20:00 +0300
+
 haltia-paint (4.1.1) unstable; urgency=medium
 
   * Packages for Flatpak and Debian.
