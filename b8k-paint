@@ -19,7 +19,8 @@ bottom has one big button per number. Pick a colour, tap its regions.
   chosen colour in the middle, zoomed in until its number reads), undo,
   and "look" (the finished picture while held). A drag moves the
   picture, which glides on when let go; a zoom takes a moment's glide.
-  Two fingers zoom and move it too, where the desktop passes them.
+  Two fingers zoom it, about where they met, where the desktop passes
+  them; moving it is for one finger.
   Fingers are followed one by one (GTK's gestures follow only the
   first): a finger that does not move taps, unless another one was on
   the screen just then; one lying still for a while (a thumb holding
@@ -892,11 +893,10 @@ class Board(Gtk.DrawingArea):
         # follow only the first finger (and keep its moves from the rest),
         # so a thumb resting on the screen, or a finger whose lift the
         # tablet lost after a palm, would stop every tap. Any finger that
-        # does not move taps; one moving finger drags; two moving fingers
-        # zoom and move the picture.
+        # does not move taps; one moving finger drags; two fingers zoom.
         self.fingers = {}  # sequence -> what it did
         self.panning = None  # the finger dragging the picture
-        self.pinching = None  # (finger a, b, scale, distance, spot under them)
+        self.pinching = None  # (finger a, b, scale, distance, spot, where on screen)
         self.touched = 0.0  # when a finger last did something
         self.connect("touch-event", self.on_touch)
         self.ticking = False
@@ -1045,9 +1045,9 @@ class Board(Gtk.DrawingArea):
         if self.pinching:
             self.pinch_to()
             return
-        # Two fingers on the screen zoom once one of them moves (on the
-        # tablet a first finger's moves are not passed while a second is
-        # down: its place stays where it was).
+        # Two fingers on the screen zoom once one of them moves (GTK 3
+        # passes a first finger's moves as mouse moves, mostly not at all,
+        # while a second is down: its place stays where it was).
         live = [k for k, g in self.fingers.items() if now - g["last"] < LIVE or k == seq]
         if len(live) >= 2 and f["moved"]:
             other = max((k for k in live if k != seq), key=lambda k: self.fingers[k]["t0"])
@@ -1086,17 +1086,32 @@ class Board(Gtk.DrawingArea):
         snap = cairo.ImageSurface(cairo.FORMAT_RGB24, w, h)
         self.on_draw(self, cairo.Context(snap))
         self.snap = (snap, self.shown, round(self.ox), round(self.oy))
-        self.pinching = (a, b, self.shown, max(1.0, math.hypot(fa["x"] - fb["x"], fa["y"] - fb["y"])),
-                         ((mx + self.ox) / self.shown, (my + self.oy) / self.shown))
+        # The line between where the fingers landed: the moving one has
+        # gone a little way already.
+        d0 = max(1.0, math.hypot(fb["x0"] - fa["x0"], fb["y0"] - fa["y0"]))
+        self.pinching = (a, b, self.shown, d0,
+                         ((mx + self.ox) / self.shown, (my + self.oy) / self.shown), (mx, my),
+                         (fa["x0"], fa["y0"], fb["x0"], fb["y0"]),
+                         ((fb["x0"] - fa["x0"]) / d0, (fb["y0"] - fa["y0"]) / d0),
+                         (fa["updates"], fb["updates"]))
 
     def pinch_to(self):
-        a, b, s0, d0, (px, py) = self.pinching
+        a, b, s0, d0, (px, py), (mx, my), (ax, ay, bx, by), (ux, uy), (na, nb) = self.pinching
         fa, fb = self.fingers[a], self.fingers[b]
-        mx, my = (fa["x"] + fb["x"]) / 2, (fa["y"] + fb["y"]) / 2
         low = self.app.steps()[0] if self.app.view_size else s0
-        d = math.hypot(fa["x"] - fb["x"], fa["y"] - fb["y"])
-        self.shown = min(max(s0 * d / d0, low), MAX_ZOOM)
-        # The spot under the fingers stays under them.
+        # Only moves along the line between the fingers zoom: two fingers
+        # moving side by side do not. GTK 3 passes the moves of only one of
+        # them (the second): the other is taken to move as far the other way.
+        ra = (fa["x"] - ax) * ux + (fa["y"] - ay) * uy
+        rb = (fb["x"] - bx) * ux + (fb["y"] - by) * uy
+        if fa["updates"] == na:
+            ra = -rb
+        elif fb["updates"] == nb:
+            rb = -ra
+        d = d0 + rb - ra
+        self.shown = min(max(s0 * max(d, 1.0) / d0, low), MAX_ZOOM)
+        # Zoom about the spot where the fingers met; they do not move the
+        # picture (one finger does that).
         w, h = self.size()
         self.put((px * self.shown - mx + w / 2) / self.shown, (py * self.shown - my + h / 2) / self.shown)
 
@@ -1133,14 +1148,9 @@ class Board(Gtk.DrawingArea):
 
     def on_motion(self, _widget, event):
         if self.fingers and not self.press:
-            # With two fingers down the first one's moves come as mouse
-            # moves on the tablet (not marked as made from a finger): they
-            # are the moves of the finger that sends none of its own.
-            quiet = [k for k, f in self.fingers.items() if not f["updates"]]
-            if quiet:
-                seq = min(quiet, key=lambda k: self.fingers[k]["t0"])
-                self.touched = time.monotonic()
-                self.finger_moved(seq, self.fingers[seq], event.x, event.y, self.touched)
+            # GTK 3 turns some of a first finger's moves into mouse moves
+            # while a second finger is down (not marked as made from a
+            # finger): too few to follow it by; that finger counts as still.
             return True
         if not self.mouse(event) or self.zooming or not self.press:
             return False
