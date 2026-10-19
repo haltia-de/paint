@@ -1,6 +1,6 @@
 # Maintainer: Mikhail Nevskiy <rensomail@gmail.com>
 pkgname=haltia-paint
-pkgver=4.1.3
+pkgver=4.1.4
 pkgrel=0
 pkgdesc="Раскраска: Colour by number on paintings and prints (GTK 3)"
 url="https://github.com/haltia-de/paint"

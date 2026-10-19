@@ -1699,6 +1699,10 @@ class Paint:
         # Progress is written a moment after a tap; write it on the way out.
         GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self.quit)
         self.stack = Gtk.Stack()
+        # Only the page shown sets how low the window can be: the search
+        # page has to fit above the on-screen keyboard (the tablet's 800 px
+        # less its 360), while the board alone needs more.
+        self.stack.set_vhomogeneous(False)
         self.win.add(self.stack)
         self.board = None
         self.swatches = []

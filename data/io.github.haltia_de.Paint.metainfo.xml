@@ -19,6 +19,12 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
+    <release version="4.1.4" date="2026-10-19">
+      <description>
+        <p>When searching for new paintings, the window makes room for the on-screen keyboard instead of covering it.</p>
+        <p xml:lang="ru">При поиске новых картин окно уступает место экранной клавиатуре и больше её не закрывает.</p>
+      </description>
+    </release>
     <release version="4.1.3" date="2026-10-19">
       <description>
         <p>Outside the Haltia shell the window has the desktop's usual buttons, close among them.</p>
