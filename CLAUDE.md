@@ -69,8 +69,15 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   `data-n` (colour number from 1, light to dark) and `data-label` "x y r"
   (where the number goes, inradius); root carries `data-palette`,
   `data-count`, `data-name`, `data-theme`, `data-level`, `data-source`.
-- `data/` — `.desktop`, hicolor SVG icon, AppStream metainfo;
-  `packaging/alpine/APKBUILD`.
+- `data/` — `.desktop`, hicolor SVG icon, AppStream metainfo.
+- Packages: `packaging/alpine/APKBUILD`; `debian/` (deps from noble and
+  trixie plus our `python3-haltia-kit`; the pre-4.0 names are left out);
+  `packaging/flatpak/io.github.haltia_de.Paint.yml` (GNOME 51, its
+  Python 3.14; `haltia-kit.yml` is a copy of haltia-de/kit's module;
+  numpy, scipy, Pillow as cp314 manylinux wheels per arch, keep them at
+  `requirements.txt`; pycairo from the runtime; `--filesystem=xdg-pictures`).
+  Build the Flatpak from the checkout with
+  `flatpak run org.flatpak.Builder --user --install --force-clean build <manifest>`.
 
 ## Architecture notes
 

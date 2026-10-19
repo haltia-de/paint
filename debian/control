@@ -1,0 +1,19 @@
+Source: haltia-paint
+Section: misc
+Priority: optional
+Maintainer: Haltia <rensomail@gmail.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+Homepage: https://github.com/haltia-de/paint
+Rules-Requires-Root: no
+
+Package: haltia-paint
+Architecture: all
+Depends: ${misc:Depends}, python3, python3-gi, gir1.2-gtk-3.0, python3-cairo,
+ python3-gi-cairo, python3-pil, python3-numpy, python3-scipy, python3-haltia-kit
+Description: colour by number on famous paintings, large and calm
+ Раскраска (Paint) is a colour-by-number game in the style of Happy Color:
+ a painting is split into numbered regions, a tap fills a region with the
+ chosen colour. It comes with public-domain paintings, makes pictures from
+ one's own photos and finds paintings on Wikidata. No timer, score or ads.
+ Part of Haltia, a calm touch desktop; it runs on any GTK desktop.

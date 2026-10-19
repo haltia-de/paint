@@ -54,7 +54,15 @@ apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy py
 Проверенные версии пакетов Python (для Flatpak, где они ставятся колёсами)
 — в `requirements.txt`.
 
-Пакет для Alpine: `packaging/alpine/APKBUILD`.
+Пакеты:
+
+- Alpine: `packaging/alpine/APKBUILD`;
+- Debian и Ubuntu: `debian/` (`dpkg-buildpackage -b`), нужен пакет
+  `python3-haltia-kit`;
+- Flatpak (GNOME 51):
+  `flatpak-builder --user --install build packaging/flatpak/io.github.haltia_de.Paint.yml`.
+  Программа видит только «Изображения» (свои фотографии и готовые
+  картины), картинку из другой папки открывает через выбор файла.
 
 Поставить в систему (нужен root):
 

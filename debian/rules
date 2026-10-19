@@ -1,0 +1,9 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_auto_install:
+	sh install.sh $(CURDIR)/debian/haltia-paint /usr
+	# The names from before ADR 0004 are for the Haltia tablet only.
+	rm -f debian/haltia-paint/usr/bin/b8k-paint \
+		debian/haltia-paint/usr/share/applications/io.github.trudenboy.Paint.desktop
