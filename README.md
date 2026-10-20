@@ -57,7 +57,7 @@ python3 make-paintings.py CACHE_DIR [slug...]           # встроенные �
 
 ## Установка
 
-**Ubuntu 24.04, Debian 13** (и elementary OS 8, Linux Mint 22) — из
+**Ubuntu 24.04 и 26.04, Debian 13** (и elementary OS 8, Linux Mint 22) — из
 репозитория apt Haltia:
 
 ```
