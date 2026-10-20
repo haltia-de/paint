@@ -73,8 +73,8 @@ licence and most paintings are in the public domain. A tap on a result
 shows it large with its artist and year, as it will look painted at the
 chosen size of regions (a tap on it shows the painting itself), with
 big numbers (no region too thin for a number read without zooming far
-in; on at first) and with its own black outlines kept (prints, drawings)
-or not, «Крупные номера» and «Чёрные контуры» turning each on and off. pbn.py
+in; «Крупные номера», on at first) and with none, few or more of its own
+black outlines kept (prints, drawings; «Контуры: нет / мало / много»). pbn.py
 makes it in a process of its own at low priority, as it takes 15 to 30
 seconds on the tablet, with a bar of how far it is; only one pbn.py runs
 at a time (haltia_paint.convert): the preview goes before photos, and
@@ -595,16 +595,16 @@ def pixbuf_of(data, width, height):
 
 
 def kind_name(kind):
-    """A preview's kind of picture, (level, big numbers, outlines), as it
-    ends a file or id: "3", "3b", "4bk" (pictures before 4.3 have only
-    the level)."""
+    """A preview's kind of picture, (level, big numbers, outlines 0/1/2),
+    as it ends a file or id: "3", "3b", "4bk", "4bkk" (pictures before
+    4.3 have only the level)."""
     level, big, ink = kind
-    return "%d%s%s" % (level, "b" if big else "", "k" if ink else "")
+    return "%d%s%s" % (level, "b" if big else "", "k" * ink)
 
 
 def kind_flags(kind):
     _level, big, ink = kind
-    return (["--big-numbers"] if big else []) + (["--ink"] if ink else [])
+    return (["--big-numbers"] if big else []) + (["--ink", str(ink)] if ink else [])
 
 
 def downloaded_path(qid, kind):
@@ -1779,7 +1779,7 @@ class Paint:
         self.search_gen = 0
         self.preview_item = None
         # The kind of picture a preview makes, kept from one to the next.
-        self.big_numbers, self.ink = True, False
+        self.big_numbers, self.ink = True, 0
         self.pool = Workers(3)
         # pbn.py, one at a time: previews first, then photos (Преобразование).
         self.conversion = Conversion(PBN, notify=GLib.idle_add)
@@ -2418,16 +2418,25 @@ class Paint:
             grid.attach(b, n % 2, n // 2, 1, 1)
             self.grade_buttons.append((b, grade))
         side.pack_start(grid, False, False, 0)
-        # How it is made, each on or off: numbers that read without
-        # zooming far in (fewer regions), the picture's own black outlines.
-        kinds = Gtk.Box(spacing=10, homogeneous=True)
+        # How it is made: numbers that read without zooming far in (fewer
+        # regions), on or off; how much of the picture's own black
+        # outlines it keeps (pbn.py --ink 1 or 2).
         self.big_button = Gtk.Button(label="Крупные номера")
-        self.ink_button = Gtk.Button(label="Чёрные контуры")
-        for b, name in ((self.big_button, "big"), (self.ink_button, "ink")):
+        self.big_button.get_style_context().add_class("grade")
+        self.big_button.connect("clicked", lambda _b: self.toggle_big())
+        side.pack_start(self.big_button, False, False, 0)
+        lines = Gtk.Box(spacing=10)
+        label = Gtk.Label(label="Контуры:", xalign=0)
+        label.get_style_context().add_class("pinfo")
+        lines.pack_start(label, False, False, 0)
+        self.ink_buttons = []
+        for level, name in ((0, "нет"), (1, "мало"), (2, "много")):
+            b = Gtk.Button(label=name)
             b.get_style_context().add_class("grade")
-            b.connect("clicked", lambda _b, k=name: self.toggle_kind(k))
-            kinds.pack_start(b, True, True, 0)
-        side.pack_start(kinds, False, False, 0)
+            b.connect("clicked", lambda _b, v=level: self.set_ink(v))
+            lines.pack_start(b, True, True, 0)
+            self.ink_buttons.append((b, level))
+        side.pack_start(lines, False, False, 0)
         self.preview_note = Gtk.Label(xalign=0)
         self.preview_note.set_line_wrap(True)
         self.preview_note.get_style_context().add_class("note")
@@ -2472,11 +2481,12 @@ class Paint:
         """What the preview is to show: (level, big numbers, outlines)."""
         return (self.grade[0], self.big_numbers, self.ink)
 
-    def toggle_kind(self, name):
-        if name == "big":
-            self.big_numbers = not self.big_numbers
-        else:
-            self.ink = not self.ink
+    def toggle_big(self):
+        self.big_numbers = not self.big_numbers
+        self.choose_grade(self.grade)
+
+    def set_ink(self, level):
+        self.ink = level
         self.choose_grade(self.grade)
 
     def convert_grades(self, item):
@@ -2565,7 +2575,8 @@ class Paint:
         self.grade = grade
         item = self.preview_item
         for b, on in ([(b, g == grade) for b, g in self.grade_buttons]
-                      + [(self.big_button, self.big_numbers), (self.ink_button, self.ink)]):
+                      + [(b, v == self.ink) for b, v in self.ink_buttons]
+                      + [(self.big_button, self.big_numbers)]):
             (b.get_style_context().add_class if on else b.get_style_context().remove_class)("on")
         kind = self.kind()
         if kind not in item["pics"]:

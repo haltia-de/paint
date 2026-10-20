@@ -9,8 +9,8 @@ see them side by side.
 CACHE holds the images that bench/images.txt lists (--fetch gets the
 missing ones from Wikimedia Commons); OUT gets index.html and pictures.
 Modes: normal; big (--big-numbers: no region too thin for a number read
-without zooming far in); ink (big and --ink: the picture's own black
-outlines kept).
+without zooming far in); ink and ink2 (big and --ink 1 or 2: the
+picture's own black outlines kept, few or more).
 
 What it showed (October 2026, 11 images, against pbn.py before 4.3):
 smoothing that keeps edges and joining the neighbour most alike (colour,
@@ -83,8 +83,10 @@ def fetch(cache, slug, name):
 
 # --- the modes ---------------------------------------------------------------
 MODES = {"normal": {}, "big": {"min_radius": pbn.MIN_RADIUS_BIG},
-         "ink": {"min_radius": pbn.MIN_RADIUS_BIG, "ink": True}}
-NAMES = {"normal": "обычные номера", "big": "крупные номера", "ink": "крупные + контуры"}
+         "ink": {"min_radius": pbn.MIN_RADIUS_BIG, "ink": 1},
+         "ink2": {"min_radius": pbn.MIN_RADIUS_BIG, "ink": 2}}
+NAMES = {"normal": "обычные номера", "big": "крупные номера", "ink": "крупные + контуры мало",
+         "ink2": "крупные + контуры много"}
 INK = pbn.INK
 
 

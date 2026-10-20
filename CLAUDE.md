@@ -81,7 +81,8 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   a step is better when the numbers say so on all the images.
 - `make-paintings.py` — offline generator for `pictures/*.svgz`. `PAINTINGS`
   lists slug, Commons file name, Russian title, theme, level; all are made
-  with big numbers, those in `INK` with their own black outlines.
+  with big numbers, those in `INK` with their own black outlines (level 1,
+  or 2 for those also in `INK_MORE`).
 - `pictures/*.svgz` — built-in pictures, gzipped SVG: one `<path>` per
   region (`fill-rule` evenodd, holes as inner rings, `M x y x y ...Z`) with
   `data-n` (colour number from 1, light to dark) and `data-label` "x y r"
@@ -89,7 +90,7 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   after them, the picture's own outlines (`--ink`), drawn black on top,
   not a region; root carries `data-palette`, `data-count` (regions, ink
   not counted), `data-sig` (fingerprint of the regions), `data-mode`
-  ("big", "ink"), `data-name`, `data-theme`, `data-level`, `data-source`.
+  ("big", "ink"/"ink2"), `data-name`, `data-theme`, `data-level`, `data-source`.
 - `data/` — `.desktop`, hicolor SVG icon, AppStream metainfo.
 - Packages: `packaging/alpine/APKBUILD`; `debian/` (deps from noble and
   trixie plus our `python3-haltia-kit`; the pre-4.0 names are left out);
@@ -114,8 +115,10 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   edge (`edges`), and same-coloured neighbours join every round so the
   count reached is the count aimed at (area first, thinness by distance
   transform only when sizes are right; `MIN_RADIUS`, or `MIN_RADIUS_BIG`
-  with `--big-numbers`); `--ink`: `ink_lines` (black-hat with hysteresis)
-  become fixed regions of colour `INK` that take tiny cells between lines;
+  with `--big-numbers`); `--ink [1|2]`: `ink_lines` (black-hat with
+  hysteresis, only dark lines on a ground lighter than `INK_GROUND[level]`,
+  nothing broader than a line) become fixed regions of colour `INK` that
+  take tiny cells between lines;
   numbers in the middle of each region's widest part (`label_points`);
   then borders traced once per region pair on pixel corners so neighbours
   share them exactly, smoothed and simplified. Coordinates: 1000 units on
@@ -130,14 +133,14 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   boxes, then `cairo.in_fill`; a miss falls back to the nearest unpainted
   region of the chosen colour within `FINGER` px via `in_stroke`.
 - **Picture ids** prefix the source: `builtin-<slug>`, `photo-<hash>`,
-  `wd-<QID>-<kind>` (kind: level, then `b` for big numbers, `k` for ink,
-  e.g. `3bk`; before 4.3 only the level). Progress lives in
+  `wd-<QID>-<kind>` (kind: level, then `b` for big numbers, `k` per ink
+  level, e.g. `3bk`, `4bkk`; before 4.3 only the level). Progress lives in
   `~/.local/share/haltia-paint/progress/<id>.json` as `{"count", "sig",
   "filled": [region indexes]}`; a count or `sig` mismatch resets it (a
   picture made again). `last` stores the last opened id.
-- **Preview kinds**: a grade plus «Крупные номера» and «Чёрные контуры»
-  toggles (`Paint.kind()`, kept between previews; big numbers on by
-  default); each kind is its own urgent conversion. Photos of Раскраски
+- **Preview kinds**: a grade plus «Крупные номера» (on or off) and
+  «Контуры: нет / мало / много» (ink 0/1/2) (`Paint.kind()`, kept between
+  previews; big numbers on, no outlines by default); each kind is its own urgent conversion. Photos of Раскраски
   are made with big numbers.
 - **Photos and downloads** are converted through `Conversion`
   (`haltia_paint/convert.py`): `pbn.py` in a niced subprocess, one at a

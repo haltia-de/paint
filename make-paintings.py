@@ -195,7 +195,8 @@ PAINTINGS = [
     ("summer-meadow", "openclipart:142357", "Летний луг", "Природа", 2),
     ("green-valley", "openclipart:340789", "Зелёная долина", "Природа", 2),
 ]
-# Pictures whose own black outlines are kept (pbn.py --ink): prints and
+# Pictures whose own black outlines are kept (pbn.py --ink, level 1 for
+# all of these unless INK_MORE has them at 2): prints and
 # drawings with lines, where the outlines are the picture; chosen by
 # looking at both kinds side by side (prints painted with a brush, like
 # some of Koson's, get dark patches instead).
@@ -218,6 +219,8 @@ INK = {
     "flower-barrow", "forest-camp", "thatched-cottage", "stone-house", "sun-landscape",
     "lighthouse",
 }
+# Of those, the ones with more of their dark lines kept (--ink 2).
+INK_MORE = set()
 # The level of a painting above, as made now: the 128-cell paintings of
 # the grid days are 600-region ones too.
 LEVEL = {2: 2, 3: 3, 4: 4, 5: 4}
@@ -266,12 +269,12 @@ def main():
         level = LEVEL[level]
         regions, colours, detail = pbn.LEVELS[level]
         # Every built-in one with numbers to read without zooming far in.
-        ink = slug in INK
+        ink = (2 if slug in INK_MORE else 1) if slug in INK else 0
         pic = pbn.picture(Image.open(fetch(cache, name)), regions, colours, detail=detail,
                           crop=crop[0] if crop else None, min_radius=pbn.MIN_RADIUS_BIG,
                           ink=ink)
         pbn.write(pic, os.path.join(OUT, slug + ".svgz"),
-                  {"mode": "big ink" if ink else "big", "name": title, "theme": theme,
+                  {"mode": pbn.mode_name(True, ink), "name": title, "theme": theme,
                    "level": level, "source": name})
         print(slug, len(pic["regions"]), len(pic["palette"]))
 

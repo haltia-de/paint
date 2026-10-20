@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0
 """Paint by number in regions: a picture split into numbered areas.
 
-  pbn.py [--level 2|3|4|5] [--big-numbers] [--ink] [--set name=...] [--progress] IMAGE OUT.svgz
+  pbn.py [--level 2|3|4|5] [--big-numbers] [--ink [1|2]] [--set name=...] [--progress] IMAGE OUT.svgz
 
 A painting becomes a map of regions, one colour number each, written as
 SVG: one <path> per region (fill-rule evenodd, holes are inner rings)
@@ -13,7 +13,7 @@ black outlines (a print's or a drawing's lines) are kept as paths with
 data-ink, drawn on top, not painted. The root carries data-palette,
 data-count (of regions), data-sig (a fingerprint of the regions, so
 progress is not carried over to a picture made differently), data-mode
-("big", "ink") and, from --set, what haltia-paint shows: data-name,
+("big", "ink" or "ink2") and, from --set, what haltia-paint shows: data-name,
 data-theme, data-level.
 
 The steps follow drake7707/paintbynumbersgenerator (MIT), with what the
@@ -56,6 +56,10 @@ LEVELS = {2: (120, 14, 5), 3: (300, 18, 5), 4: (600, 24, 3), 5: (1000, 28, 3)}
 MIN_RADIUS, MIN_RADIUS_BIG = 2.5, 3.5
 # The colour of a picture's own outlines (--ink).
 INK = (34, 30, 28)
+# How much of the picture's darkness counts as its outlines, by --ink
+# level: a line has to lie on a ground lighter than this (Lab lightness).
+# 1 (мало): clear lines only; 2 (много): lines on darker grounds too.
+INK_GROUND = {1: 50, 2: 40}
 
 
 # sRGB 0..255 to linear light, as a table: the power for each pixel is
@@ -518,7 +522,8 @@ def picture(img, regions=300, colours=18, side=SIDE, detail=5, crop=None,
             progress=None, raster=False):
     """The region picture of a PIL image as a dict: w, h, palette,
     regions [(colour number from 0, label (x, y, r), rings)] and ink
-    [rings] (the picture's own outlines, kept black, when ink). progress,
+    [rings] (the picture's own outlines, kept black, when ink: 1 or 2,
+    INK_GROUND). progress,
     if given, is called with how much is done (0 to 1) after each step.
     raster: also the pixels it was made from, for the bench and tests:
     "raster" (rgb, labels, colour of each label, colours, ink colour or
@@ -533,7 +538,7 @@ def picture(img, regions=300, colours=18, side=SIDE, detail=5, crop=None,
             progress(DONE_AFTER[name.split()[0]])
 
     rgb = shrink(img, side, crop)
-    lines = ink_lines(rgb) if ink else None
+    lines = ink_lines(rgb, ground=INK_GROUND[int(ink)]) if ink else None
     if lines is not None:
         # The colours come from round the lines, not from the lines.
         _d, (iy, ix) = ndimage.distance_transform_edt(lines, return_indices=True)
@@ -621,6 +626,12 @@ def write(pic, path, meta=None):
     os.replace(path + ".new", path)
 
 
+def mode_name(big, ink):
+    """data-mode: "big" for big numbers, "ink" or "ink2" for outlines."""
+    return " ".join(m for m, on in (("big", big), ("ink" if ink == 1 else "ink%d" % ink, ink))
+                    if on)
+
+
 def main():
     args = argparse.ArgumentParser(description="A picture as paint by number regions.")
     args.add_argument("image")
@@ -636,8 +647,9 @@ def main():
                       help='print "progress F" lines, F the share done')
     args.add_argument("--big-numbers", action="store_true",
                       help="no region too thin for a number read without zooming far in")
-    args.add_argument("--ink", action="store_true",
-                      help="keep the picture's own black outlines (prints, drawings)")
+    args.add_argument("--ink", type=int, nargs="?", const=1, default=0, choices=sorted(INK_GROUND),
+                      help="keep the picture's own black outlines (prints, drawings): "
+                           "1 clear lines only (the default), 2 more of them")
     opts = args.parse_args()
     regions, colours, detail = LEVELS[opts.level]
     timing = []
@@ -649,7 +661,7 @@ def main():
     pic = picture(Image.open(opts.image), regions, colours, opts.side, detail, opts.crop,
                   min_radius=MIN_RADIUS_BIG if opts.big_numbers else MIN_RADIUS,
                   ink=opts.ink, timing=timing, progress=progress if opts.progress else None)
-    meta = {"mode": " ".join(m for m, on in (("big", opts.big_numbers), ("ink", opts.ink)) if on)}
+    meta = {"mode": mode_name(opts.big_numbers, opts.ink)}
     meta.update(kv.split("=", 1) for kv in opts.set)
     write(pic, opts.out, {k: v for k, v in meta.items() if v})
     if opts.progress:

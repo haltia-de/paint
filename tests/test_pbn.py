@@ -67,6 +67,14 @@ class PictureTest(unittest.TestCase):
         # The outlines' black is not a colour to paint.
         self.assertNotIn("#%02x%02x%02x" % pbn.INK, pic["palette"])
 
+    def test_more_ink_keeps_more(self):
+        rgb = np.asarray(scene(lines=True))
+        few = pbn.ink_lines(rgb, ground=pbn.INK_GROUND[1])
+        more = pbn.ink_lines(rgb, ground=pbn.INK_GROUND[2])
+        self.assertGreaterEqual(more.sum(), few.sum())
+        self.assertEqual(pbn.mode_name(True, 2), "big ink2")
+        self.assertEqual(pbn.mode_name(False, 1), "ink")
+
     def test_merge_reaches_the_count(self):
         # Speckled noise: many small regions merged down to the count.
         rng = np.random.default_rng(3)

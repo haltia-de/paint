@@ -2,8 +2,8 @@ haltia-paint (4.3.0) unstable; urgency=medium
 
   * Pictures made anew: regions follow the shapes, numbers in the middle
     and big enough to read without zooming far in, prints and drawings
-    keep their black outlines; «Крупные номера» and «Чёрные контуры» when
-    adding a picture. Begun built-in pictures start again.
+    keep their black outlines; «Крупные номера» and «Контуры: нет / мало /
+    много» when adding a picture. Begun built-in pictures start again.
 
  -- Haltia <rensomail@gmail.com>  Tue, 20 Oct 2026 12:40:00 +0300
 
