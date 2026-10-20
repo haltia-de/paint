@@ -20,7 +20,11 @@ neighbours in every round kept the time (2.3 s to 2.2 s here). OpenCV's
 mean shift was little better (56%) for some 90 MB on the tablet, SLIC
 superpixels worse (40%, a honeycomb across the shapes); so pbn.py has
 neither. Big numbers: 46% to 30% of numbers needing a large zoom, for a
-quarter fewer regions. Ink: on prints with lines, 66% to 78%.
+quarter fewer regions. Ink: on prints with lines, 66% to 78%. Details
+(a cat's pupil and iris were lost, so small regions far in colour from
+where they would go now stay): borders along the shapes 51% to 56%
+with big numbers, likeness 7.1 to 6.8, for more small numbers (31% to
+43% need a large zoom).
 
 Numbers (per image and on average):
   regions     how many, against the level's target

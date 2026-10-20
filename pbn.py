@@ -54,6 +54,10 @@ LEVELS = {2: (120, 14, 5), 3: (300, 18, 5), 4: (600, 24, 3), 5: (1000, 28, 3)}
 # With big numbers it can be read without zooming far in, for fewer
 # regions (about a quarter fewer).
 MIN_RADIUS, MIN_RADIUS_BIG = 2.5, 3.5
+# A small region this unlike (Lab ΔE) the neighbour it would join is a
+# detail that stays (an eye, a highlight), if no thinner than this
+# (picture units).
+DETAIL_DE, DETAIL_RADIUS = 18, 2.0
 # The colour of a picture's own outlines (--ink).
 INK = (34, 30, 28)
 # How much of the picture's darkness counts as its outlines, by --ink
@@ -300,32 +304,59 @@ def merge(labels, colour_of, colour_lab, strength, regions, min_area, min_radius
     regions are left and each has min_area and min_radius; neighbours that
     end up one colour become one region in every round, so the count aimed
     at is the count reached. Area is cheap to count, so thinness is
-    measured only once the sizes are right. Regions of colour ink (the
-    picture's own outlines) stay, take what is too small between them,
-    and do not count."""
+    measured only once the sizes are right. A detail is kept: a small
+    region whose best neighbour is still far from its colour (an eye's
+    pupil next to its pink rim, a highlight), down to a third of
+    min_area and DETAIL_RADIUS; its number is small, but what the picture
+    shows stays; only the count of regions takes it away. Regions of
+    colour ink (the picture's own outlines) stay, take what is too small
+    between them, and do not count."""
     thin_rounds = 0
     while True:
         n = len(colour_of)
         is_ink = colour_of == ink
         area = np.bincount(labels.ravel(), minlength=n)
-        small = (area < min_area) & ~is_ink
         real = n - int(is_ink.sum())
+        a, b, g = border_pairs(labels, strength)
+        lab_of = colour_lab[colour_of]
+
+        def joining(small, keep_details):
+            """The small regions that go, and where (their best neighbour)."""
+            best = best_neighbours(a, b, g, n, small, lab_of, is_ink)
+            go = small & (best >= 0)
+            far = np.linalg.norm(lab_of - lab_of[np.maximum(best, 0)], axis=1) > DETAIL_DE
+            return go & ~(far & keep_details), best
+
+        small = (area < min_area) & ~is_ink
+        keep = area >= min_area / 3
         if real > regions:
-            # The smallest ones above the limit as well; a few at a time
-            # so that the rest are measured again after.
-            order = np.argsort(np.where(is_ink, np.iinfo(np.int64).max, area))
-            small[order[:max(1, (real - regions) // 4)]] = True
-        if not small.any():
-            small = (radii(labels, inner_distance(labels), n) < min_radius) & ~is_ink
+            # The least ones above the limit as well, details or not: small
+            # and like what is round them (the average colour along their
+            # border) go first, so a pupil outlasts a patch of fur; a few
+            # at a time so that the rest are measured again after.
+            pairs = np.bincount(a, minlength=n) + np.bincount(b, minlength=n)
+            round_ = np.stack([np.bincount(a, lab_of[b, k], n) + np.bincount(b, lab_of[a, k], n)
+                               for k in range(3)], 1) / np.maximum(pairs, 1)[:, None]
+            stands_out = np.linalg.norm(lab_of - round_, axis=1)
+            worth = area * (1 + stands_out / DETAIL_DE) ** 2
+            order = np.argsort(np.where(is_ink, np.inf, worth))
+            over = np.zeros(n, bool)
+            over[order[:max(1, (real - regions) // 4)]] = True
+            small |= over
+            keep &= ~over
+        go, best = joining(small, keep) if small.any() else (small, None)
+        if not go.any():
+            radius = radii(labels, inner_distance(labels), n)
+            small = (radius < min_radius) & ~is_ink
             if not small.any() or thin_rounds == 4:
                 return labels, colour_of
             thin_rounds += 1
-        a, b, g = border_pairs(labels, strength)
-        best = best_neighbours(a, b, g, n, small, colour_lab[colour_of], is_ink)
+            go, best = joining(small, keep & (radius >= DETAIL_RADIUS))
+            if not go.any():
+                return labels, colour_of
         # Each small region points to its best neighbour; chains and
         # pairs pointing at each other end in the larger region.
         parent = np.arange(n)
-        go = small & (best >= 0)
         parent[go] = best[go]
         ids = np.arange(n)
         for _ in range(64):
