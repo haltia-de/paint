@@ -76,8 +76,19 @@ answers 429 when downloading many files; `make-paintings.py` retries.
     next to painted regions of a like colour. Chosen in Настройки (⚙ in the
     gallery header), kept by `haltia_kit.settings` in
     `~/.config/haltia/paint.conf` (`highlight`, `highlight-colour`, and
-    `new-in-colour`: pictures not begun shown in colour in the gallery).
-    Outlines are `INK_PREVIEW`, a softer grey, in the preview and gallery.
+    `new-in-colour`: pictures not begun shown in colour in the gallery;
+    also `gallery-order`, chosen above the gallery). Outlines are
+    `INK_PREVIEW`, a softer grey, in the preview and gallery.
+  - `haltia_paint/sections.py` — Разделы галереи: the gallery's sections
+    by theme (`THEMES`, easier first within) or by difficulty (`BANDS`
+    of region counts), with Продолжить (pictures begun, also left in
+    their section) first and Готовые (finished, only there) last; the
+    note under a card's name says what its heading does not. A
+    downloaded picture's theme comes from its Wikidata genre (P136) or
+    what it depicts (P180) (`theme_of`), kept by item in
+    `~/.local/share/haltia-paint/themes.json` (the preview's «Тема» can
+    change it; pictures downloaded before 4.5 carried their artist there
+    and are looked up once); own photos are Мои фотографии.
 - `pbn.py` — the region generator (raster to paint-by-number SVG), used by
   `make-paintings.py` as a module and by the program as a subprocess.
 - `bench/` — стенд генератора: `bench.py CACHE OUT [--fetch]` runs the
@@ -112,11 +123,11 @@ answers 429 when downloading many files; `make-paintings.py` retries.
 
 ## Architecture notes
 
-- **Levels** are numeric codes in the SVG and gallery sections (`SECTIONS` in
-  `haltia-paint`); 2 = ~120 regions (some built-ins); 3/4/5 = at most 300/600/1000 regions with 18/24/28
+- **Levels** are numeric codes in the SVG; 2 = ~120 regions (some built-ins); 3/4/5 = at most 300/600/1000 regions with 18/24/28
   colours (`LEVELS` in `pbn.py`, `GRADES` in `haltia-paint` must agree);
   built-ins use 3 and 4, 5 only for downloads; 8 = downloaded from
-  Wikidata; 9 = user photos.
+  Wikidata; 9 = user photos. The gallery's sections no longer follow
+  them (`haltia_paint/sections.py`).
 - **Generator** (`pbn.py`, after drake7707/paintbynumbersgenerator):
   `shrink`, a guided filter (edges kept, brushwork flattened), Lab k-means
   colours, mode filter, connected components, `merge`: small/thin regions

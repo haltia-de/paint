@@ -1,3 +1,13 @@
+haltia-paint (4.5.0) unstable; urgency=medium
+
+  * Gallery by theme or by difficulty, with Продолжить and Готовые; themes
+    of found paintings from Wikidata; «Раскрашивать» adds and opens; the
+    next colour chosen and scrolled to; progress in the header; tools
+    rearranged; darker numbers; red buttons for questions that lose
+    something; Escape and back work as «←».
+
+ -- Haltia <rensomail@gmail.com>  Tue, 20 Oct 2026 18:00:00 +0300
+
 haltia-paint (4.4.0) unstable; urgency=medium
 
   * Thinner stripes and bright highlight colours; pictures not begun in

@@ -8,7 +8,7 @@ The names the code and its reviews use for the parts of the game.
 - **Level**: the size of regions, 2/3/4/5 (about 120/300/600/1000
   regions); in the gallery also 8 (downloaded) and 9 (own photo).
 - **Grade** (размер областей): a level as the preview offers it: Крупные,
-  Мелкие, Очень мелкие.
+  Средние (where the preview starts), Мелкие.
 - **Преобразование** (Conversion): making an image into a picture with
   `pbn.py`; `haltia_paint/convert.py` is the one queue of it.
   - **Urgent work**: what the person is waiting for (a grade in the
@@ -22,3 +22,23 @@ The names the code and its reviews use for the parts of the game.
 - **Progress** (прогресс): which regions of a picture are painted, in
   `progress/<id>.json`; not the progress of a conversion, which is a
   share shown as a bar.
+- **Section** (раздел): a heading of the gallery and its cards,
+  `haltia_paint/sections.py`: Продолжить (begun), then the themes or the
+  difficulties, then Готовые (finished).
+  - **Theme** (тема): what a picture shows: Природа, Море и корабли,
+    Животные, Цветы, Японская гравюра, Дома и города, Люди, Натюрморт,
+    Разное, and Мои фотографии for own pictures.
+  - **Difficulty** (сложность): Лёгкие, Средние, Сложные, Очень
+    сложные, by the count of regions.
+
+## Words on the screen
+
+Since 4.5 the screen says one thing one way:
+
+- what is painted is a **картина** (not картинка; картинка is an image
+  file one picks, a photo or a drawing);
+- **Галерея** is only the photos program (Взять из Галереи, Сохранить в
+  Галерею); the program's own list of pictures is **Раскраски**;
+- taking a picture in is **Добавить** (the preview's button,
+  **Раскрашивать**, adds it and opens it); a downloaded one is taken out
+  with **Убрать**; progress is wiped with **Начать заново**.

@@ -1,5 +1,25 @@
 # Что нового · What's new
 
+## 4.5.0 (2026-10-20)
+
+### Русский
+
+- Галерея показывает картины по темам или по сложности (Лёгкие, Средние, Сложные, Очень сложные), а кнопки сверху сразу переходят к нужному разделу. Начатые картины собраны вверху, в «Продолжить», готовые — внизу, в «Готовых».
+- У картины, найденной в интернете, тема берётся из её жанра; в предпросмотре тему можно сменить. Кнопка «Раскрашивать» добавляет картину и сразу её открывает, а свои картинки попадают в «Мои фотографии».
+- Когда цвет закончен, выбирается следующий, и палитра сама прокручивается к нему. В шапке видно, сколько процентов картины готово.
+- Кнопки справа переставлены: большая «где?» и отмена сверху, приближение посередине, «посмотреть» внизу. «Вся картина» нарисована четырьмя уголками, а «посмотреть» включается нажатием и выключается следующим.
+- При добавлении картины размеры областей называются «Крупные», «Средние» и «Мелкие», и сначала выбраны «Средние».
+- Номера и подписи стали темнее и крупнее, красная обводка ошибки держится дольше, кнопки «Начать заново» и «Убрать» в вопросах красные. Escape и кнопка «назад» работают как «←».
+
+### English
+
+- The gallery shows pictures by theme or by difficulty (easy, medium, hard, very hard), and buttons at the top jump to a section. Pictures begun are gathered at the top in «Продолжить» (continue), finished ones at the bottom in «Готовые» (finished).
+- A picture found on the internet takes its theme from its genre; the preview can change it. «Раскрашивать» (paint) adds the picture and opens it at once, and one's own pictures go to «Мои фотографии» (my photos).
+- When a colour is done the next one is chosen and the palette scrolls to it. The header shows how much of the picture is done.
+- The buttons on the right are rearranged: a large "where?" and undo at the top, zoom in the middle, "look" at the bottom. "Whole picture" is drawn as four corners, and "look" stays on after a tap until the next.
+- When adding a picture, the sizes of regions are «Крупные», «Средние» and «Мелкие» (large, medium, small), and «Средние» is chosen at first.
+- Numbers and notes are darker and larger, the red outline of a wrong tap stays longer, and the «Начать заново» and «Убрать» buttons in questions are red. Escape and the back key work as «←».
+
 ## 4.4.0 (2026-10-20)
 
 ### Русский
