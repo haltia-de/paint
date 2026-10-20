@@ -38,6 +38,10 @@ install -m 644 "$here"/haltia_paint/*.py "$root$prefix/lib/haltia-paint/haltia_p
 rm -rf "$share/haltia-paint" "$root/usr/local/share/b8k/paint"
 install -d -m 755 "$share/haltia-paint"
 install -m 644 "$here"/pictures/*.svgz "$share/haltia-paint/"
+# The paintings they were made from (for «Оригинал»), and the sounds.
+install -d -m 755 "$share/haltia-paint/originals" "$share/haltia-paint/sounds"
+install -m 644 "$here"/pictures/originals/*.jpg "$share/haltia-paint/originals/"
+install -m 644 "$here"/data/sounds/*.oga "$share/haltia-paint/sounds/"
 # Version 2 went into /usr/local; from a package it would come first in
 # PATH and stay the one that runs.
 if [ "$prefix" != /usr/local ]; then

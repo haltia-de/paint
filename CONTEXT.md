@@ -30,6 +30,15 @@ The names the code and its reviews use for the parts of the game.
     Разное, and Мои фотографии for own pictures.
   - **Difficulty** (сложность): Лёгкие, Средние, Сложные, Очень
     сложные, by the count of regions.
+- **Hint** (подсказка «где?»): the button that shows the nearest
+  region of the chosen colour still to paint; may be hidden, limited
+  per picture (the count kept in its Progress) and zoom more or less.
+  The **rings** round the last regions of a colour are a hint too.
+- **Отклик** (Feedback): the sound and the buzz when a colour or a
+  picture is done, `haltia_paint/feedback.py`.
+- **End** (конец картины): the replay (повтор: the picture painted again
+  in the order it was painted) and «Готово!» with its buttons;
+  **Оригинал** is the painting the picture was made from.
 
 ## Words on the screen
 

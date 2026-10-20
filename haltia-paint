@@ -9,14 +9,20 @@ bottom has one big button per number. Pick a colour, tap its regions.
   striped (or as chosen in Настройки) with their number bold, so they are
   easy to find. A region of another number cannot be painted. When a
   colour is done the next one with regions left is chosen, and the
-  palette scrolls to it; the header shows how far the picture is.
+  palette scrolls to it, with a soft bell and a short buzz (feedbackd,
+  where there is one; haltia_paint.feedback); the header shows how far
+  the picture is. With three regions or fewer of the chosen colour left,
+  each gets a blue ring, seen at any zoom.
 - A tap a little beside a region of the chosen number still paints it:
   a finger is wider than the smallest regions.
 - Numbers show once they are large enough to read; small regions show
   theirs when zoomed in.
 - The buttons on the right carry drawn icons, no words, the most used on
   top: "where?" (large and blue: puts the nearest unpainted region of the
-  chosen colour in the middle, zoomed in until its number reads), undo;
+  chosen colour in the middle, zoomed in until its number reads; tapped
+  again, the next one; in Настройки it can be hidden, limited to so many
+  times a picture, the count left shown on it, and zoom more or less),
+  undo;
   zoom in, zoom out (down to the whole picture on screen), "whole
   picture" (four corners: one tap fits the picture to the screen, the
   next one goes back to the same zoom and place); and "look" (the eye: a
@@ -32,10 +38,15 @@ bottom has one big button per number. Pick a colour, tap its regions.
 - A wrong tap gets a red outline for a second; there is no timer, no
   score, no ads.
 - Progress is saved after every tap, so a picture can wait for tomorrow;
-  the program starts on the last picture, unless it is finished. A
-  finished picture shows without its outlines and numbers, and
-  "Сохранить в Галерею" keeps it as a PNG in Изображения/Мои раскраски,
-  where Галерея (the photos program) shows it.
+  the program starts on the last picture, unless it is finished.
+- At a picture's end: a short tune and a longer buzz, the picture painted
+  again region by region in the order it was painted (some 8 s; a tap
+  skips it; Настройки can leave it out), then «Готово!» and its buttons,
+  no dialog: "Сохранить в Галерею" keeps it as a PNG in Изображения/Мои
+  раскраски, where Галерея (the photos program) shows it; «Посмотреть ещё
+  раз», «Оригинал» (the painting itself in its place: built-in ones'
+  in originals/, a downloaded one's kept beside it, an own photo) and
+  «К раскраскам». A finished picture opened again shows its end.
 
 Pictures are gzipped SVG made by pbn.py: one path per region, with its
 number and the point where the number goes. The gallery (Раскраски)
@@ -142,6 +153,12 @@ PREFIX = os.path.dirname(HERE)
 BUILTIN = next((d for d in (os.path.join(HERE, "pictures"),
                             os.path.join(PREFIX, "share", "haltia-paint"))
                 if os.path.isdir(d)), os.path.join(PREFIX, "share", "haltia-paint"))
+# The paintings the built-in pictures were made from (originals/<slug>.jpg,
+# for «Оригинал») and the program's sounds.
+ORIGINALS = os.path.join(BUILTIN, "originals")
+SOUNDS = next((d for d in (os.path.join(HERE, "data", "sounds"),
+                           os.path.join(PREFIX, "share", "haltia-paint", "sounds"))
+               if os.path.isdir(d)), os.path.join(PREFIX, "share", "haltia-paint", "sounds"))
 # Photos to make into pictures: Изображения/Раскраски (in a Flatpak only
 # the Pictures folder is reached; the home folder is there but cannot be
 # read, so every path comes from GLib); before 4.1 it was ~/Раскраски.
@@ -150,7 +167,7 @@ PICTURES = (GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES)
             or os.path.join(GLib.get_home_dir(), "Pictures"))
 PHOTOS = os.path.join(PICTURES, "Раскраски")
 OLD_PHOTOS = os.path.join(GLib.get_home_dir(), "Раскраски")
-# Where "Сохранить в галерею" puts a finished picture.
+# Where "Сохранить в Галерею" puts a finished picture.
 SAVED = os.path.join(PICTURES, "Мои раскраски")
 DATA = os.path.join(GLib.get_user_data_dir(), "haltia-paint")
 DOWNLOADED = os.path.join(DATA, "downloaded")
@@ -166,6 +183,7 @@ sys.path.insert(0, HERE if os.path.isdir(os.path.join(HERE, "haltia_paint"))
 from haltia_paint.convert import Conversion  # noqa: E402
 from haltia_paint.highlight import COLOURS, STYLES, Highlight  # noqa: E402
 from haltia_paint import sections  # noqa: E402
+from haltia_paint.feedback import Feedback  # noqa: E402
 # Zoom in screen pixels per picture unit (a picture is 1000 units along
 # its long side): the whole picture on screen, then up by ZOOM_STEP to
 # MAX_ZOOM.
@@ -207,6 +225,18 @@ THUMB, LARGE = 330, 960
 GRADES = ((3, "Крупные", 300), (4, "Средние", 600), (5, "Мелкие", 1000))
 # The preview starts at Средние.
 GRADE = 1
+# How many times «где?» may be used on one picture (Настройки; 0: no limit).
+HINT_LIMITS = ((0, "Без ограничений"), (3, "3 раза"), (5, "5 раз"), (10, "10 раз"))
+# How far «где?» zooms in: until the region's number is so many px (0: it
+# only moves the picture).
+HINT_ZOOMS = ((0, "Не приближать"), (14, "Немного"), (20, "Средне"), (32, "Сильно"))
+HINT_ZOOM = 20
+# With this few regions of the chosen colour left, each gets a ring
+# (Настройки: Кольца вокруг последних), seen at any zoom.
+RING_LEFT = 3
+# The picture painted again at its end: in about REPLAY_STEPS steps of
+# REPLAY_TICK ms (some 8 s, whatever the count of regions).
+REPLAY_STEPS, REPLAY_TICK = 100, 80
 # What a picture may be on Wikidata (painting, print: Hokusai's waves are
 # prints), and the occupations of an artist whose works a search lists.
 KINDS = ("Q3305213", "Q11060274")
@@ -257,6 +287,7 @@ button.reset {
 }
 .haltia-dialog button.danger label { color: #ffffff; text-shadow: none; }
 .card label.done { font-size: 24px; font-weight: bold; color: #1a7f45; }
+label.end { font-size: 40px; font-weight: bold; color: #1a7f45; }
 label.section {
   font-size: 28px;
   font-weight: bold;
@@ -661,6 +692,7 @@ def load_pictures():
             pic = picture_at(cached, pic_id) if os.path.exists(cached) else None
             if pic:
                 pic["level"] = 9
+                pic["original"] = path
                 found.append(pic)
             else:
                 waiting.append(path)
@@ -713,26 +745,58 @@ def progress_path(pic):
     return os.path.join(DATA, "progress", pic["id"] + ".json")
 
 
-def load_progress(pic):
-    """The painted regions, as a set of their indexes."""
+def progress_of(pic):
+    """The progress file's contents, or {} when there is none or it is of
+    another picture: one made again (or one of the old grid ones) starts
+    again, its regions' fingerprint (data-sig) or their count differs."""
     try:
         with open(progress_path(pic)) as fh:
             data = json.load(fh)
-        # A picture made again (or one of the old grid ones) starts again:
-        # its regions' fingerprint (data-sig) or their count differs.
         if data["count"] == pic["count"] and data.get("sig") == pic.get("sig"):
-            return {i for i in data["filled"] if 0 <= i < pic["count"]}
+            return data
     except (OSError, ValueError, KeyError, TypeError):
         pass
-    return set()
+    return {}
 
 
-def save_progress(pic, filled):
+def load_progress(pic):
+    """The painted regions, as a set of their indexes."""
+    try:
+        return {i for i in progress_of(pic).get("filled", ()) if 0 <= i < pic["count"]}
+    except TypeError:
+        return set()
+
+
+def load_hints(pic):
+    """How many times «где?» was used on the picture (since 4.6)."""
+    hints = progress_of(pic).get("hints", 0)
+    return hints if isinstance(hints, int) and hints > 0 else 0
+
+
+def load_order(pic, filled, regions):
+    """The painted regions in the order they were painted (kept since 4.6),
+    those painted before in the order of their colours, light to dark:
+    for the picture painted again at its end."""
+    seen = set()
+    order = []
+    kept = progress_of(pic).get("order", ())
+    for i in kept if isinstance(kept, list) else ():
+        if i in filled and i not in seen:
+            seen.add(i)
+            order.append(i)
+    return sorted((i for i in filled if i not in seen), key=lambda i: (regions[i].n, i)) + order
+
+
+def save_progress(pic, filled, hints=0, order=None):
     path = progress_path(pic)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".new"
+    data = {"count": pic["count"], "sig": pic.get("sig"), "filled": sorted(filled),
+            "hints": hints}
+    if order is not None:
+        data["order"] = order
     with open(tmp, "w") as fh:
-        json.dump({"count": pic["count"], "sig": pic.get("sig"), "filled": sorted(filled)}, fh)
+        json.dump(data, fh)
     os.replace(tmp, path)
 
 
@@ -755,6 +819,25 @@ def write_last(pic_id):
 
 def share_done(pic, filled):
     return len(filled), pic["count"]
+
+
+def original_of(pic):
+    """The image a picture was made from, for «Оригинал», or None: a
+    built-in one's in ORIGINALS, a downloaded one's beside it (kept since
+    4.6), an own photo itself."""
+    if pic["id"].startswith("builtin-"):
+        path = os.path.join(ORIGINALS, pic["id"][len("builtin-"):] + ".jpg")
+    elif pic["id"].startswith("wd-"):
+        path = downloaded_original(pic["id"][3:].rsplit("-", 1)[0])
+    else:
+        path = pic.get("original")
+    return path if path and os.path.exists(path) else None
+
+
+def downloaded_original(key):
+    """Where the painting or own picture of a downloaded one is kept (key:
+    its Wikidata item, or own-<hash>)."""
+    return os.path.join(DOWNLOADED, key + ".jpg")
 
 
 def hex_rgb(colour):
@@ -973,6 +1056,8 @@ class Board(Gtk.DrawingArea):
         self.pic = pic
         self.regions = regions_of(pic)
         self.filled = load_progress(pic)
+        self.hints = load_hints(pic)  # times «где?» was used
+        self.order = load_order(pic, self.filled, self.regions)  # as painted
         self.full = [hex_rgb(c) for c in pic["palette"]]
         self.grey = [grey(c) for c in self.full]
         self.counts = [0] * len(self.full)  # regions left of each number
@@ -998,6 +1083,8 @@ class Board(Gtk.DrawingArea):
         threading.Thread(target=self.draw_tiles, daemon=True).start()
         self.previewing = False
         self.finished = False
+        self.replay = None  # the picture painted again at its end
+        self.original = None  # the painting itself shown, a pixbuf
         self.save_timer = None
         self.undo = []  # the regions painted, in order
         self.wrong = None
@@ -1464,6 +1551,24 @@ class Board(Gtk.DrawingArea):
             return False
         x0, y0, x1, y1 = cr.clip_extents()
         s = self.scale
+        if self.replay:
+            r = self.replay
+            cr.save()
+            cr.scale(s / r["scale"], s / r["scale"])
+            cr.set_source_surface(r["surface"], 0, 0)
+            cr.paint()
+            cr.restore()
+            return False
+        if self.original:
+            # The painting fitted into the picture's place.
+            pb = self.original
+            w, h = s * self.pic["w"], s * self.pic["h"]
+            k = min(w / pb.get_width(), h / pb.get_height())
+            cr.translate((w - pb.get_width() * k) / 2, (h - pb.get_height() * k) / 2)
+            cr.scale(k, k)
+            Gdk.cairo_set_source_pixbuf(cr, pb, 0, 0)
+            cr.paint()
+            return False
         if self.previewing or self.finished:
             cr.rectangle(0, 0, s * self.pic["w"], s * self.pic["h"])
             cr.set_source_rgb(1, 1, 1)
@@ -1501,7 +1606,25 @@ class Board(Gtk.DrawingArea):
             cr.set_source_rgb(0.88, 0.11, 0.14)
             cr.set_line_width(4)
             cr.stroke()
+        for i in self.ringed():
+            # Blue on white, so it shows on dark and light alike.
+            reg = self.regions[i]
+            cr.new_path()
+            cr.arc(reg.x * s, reg.y * s, max(reg.r * s + 16, 30), 0, 2 * math.pi)
+            cr.set_source_rgb(1, 1, 1)
+            cr.set_line_width(11)
+            cr.stroke_preserve()
+            cr.set_source_rgb(0.11, 0.44, 0.85)
+            cr.set_line_width(5)
+            cr.stroke()
         return False
+
+    def ringed(self):
+        """The regions of the chosen colour with a ring round them: its
+        last few, when Настройки want rings."""
+        if not self.app.rings or self.counts[self.chosen] > RING_LEFT:
+            return []
+        return [i for i in self.of[self.chosen] if i not in self.filled]
 
     def stand_in(self, cr, missing):
         """The places of tiles not drawn yet: the whole picture small, and
@@ -1574,7 +1697,11 @@ class Board(Gtk.DrawingArea):
                 self.paint_into(image, self.scale, key, i)
         if self.base:
             self.paint_into(self.base[1], self.base[0], (0, 0), i, numbers=False)
-        self.redraw(i)
+        if self.app.rings and self.counts[self.regions[i].n] <= RING_LEFT + 1:
+            # Rings reach beyond the region: the whole view again.
+            self.queue_draw()
+        else:
+            self.redraw(i)
 
     def set_chosen(self, number):
         """Choose a number: its regions take the highlight in the tiles on
@@ -1601,6 +1728,47 @@ class Board(Gtk.DrawingArea):
         self.finished = True
         self.queue_draw()
 
+    def set_original(self, pixbuf):
+        """Show the painting itself in place of the picture (None: not)."""
+        self.original = pixbuf
+        self.queue_draw()
+
+    def start_replay(self, done=None):
+        """The picture painted again, region by region in the order they
+        were painted, over some 8 s; done() at the end. A tap skips to it."""
+        self.original = None
+        s = self.scale
+        surface = cairo.ImageSurface(cairo.FORMAT_RGB24, math.ceil(s * self.pic["w"]),
+                                     math.ceil(s * self.pic["h"]))
+        cr = cairo.Context(surface)
+        cr.set_source_rgb(1, 1, 1)
+        cr.paint()
+        self.replay = {"surface": surface, "scale": s, "order": list(self.order), "at": 0,
+                       "done": done}
+        self.queue_draw()
+        GLib.timeout_add(REPLAY_TICK, self.replay_step)
+
+    def replay_step(self, everything=False):
+        r = self.replay
+        if r is None:
+            return False
+        order = r["order"]
+        upto = len(order) if everything else r["at"] + max(1, len(order) // REPLAY_STEPS)
+        draw_regions(cairo.Context(r["surface"]), self.pic, r["scale"], order[r["at"]:upto],
+                     lambda i: self.full[self.regions[i].n])
+        r["at"] = upto
+        self.queue_draw()
+        if upto < len(order):
+            return True
+        self.replay = None
+        if r["done"]:
+            r["done"]()
+        return False
+
+    def skip_replay(self):
+        if self.replay:
+            self.replay_step(everything=True)
+
     def save_soon(self):
         # A tap must not wait for the disk; write a moment after the last.
         if self.save_timer:
@@ -1611,7 +1779,7 @@ class Board(Gtk.DrawingArea):
         if self.save_timer:
             GLib.source_remove(self.save_timer)
             self.save_timer = None
-            save_progress(self.pic, self.filled)
+            save_progress(self.pic, self.filled, self.hints, self.order)
         return False
 
     def hit(self, x, y):
@@ -1638,6 +1806,9 @@ class Board(Gtk.DrawingArea):
         return None
 
     def tapped(self, px, py):
+        if self.replay:
+            self.skip_replay()
+            return
         if self.previewing:
             # A tap on the finished picture shown goes back to painting.
             self.app.show_look(False)
@@ -1661,16 +1832,19 @@ class Board(Gtk.DrawingArea):
         self.filled.add(i)
         self.counts[self.chosen] -= 1
         self.undo.append(i)
+        self.order.append(i)
         self.paint_over(i)
         self.save_soon()
         self.app.region_painted(self.chosen)
 
-    def nearest(self, fx, fy):
+    def nearest(self, fx, fy, shown=()):
         """The unpainted region of the chosen number whose number is
-        closest to (fx, fy), in picture units."""
+        closest to (fx, fy), in picture units; one not in shown while there
+        are others."""
         todo = [i for i in self.of[self.chosen] if i not in self.filled]
         if not todo:
             return None
+        todo = [i for i in todo if i not in shown] or todo
         return min(todo, key=lambda i: (self.regions[i].x - fx) ** 2 + (self.regions[i].y - fy) ** 2)
 
     def clear_wrong(self, i):
@@ -1685,6 +1859,8 @@ class Board(Gtk.DrawingArea):
             return
         i = self.undo.pop()
         self.filled.discard(i)
+        if self.order and self.order[-1] == i:
+            self.order.pop()
         number = self.regions[i].n
         self.counts[number] += 1
         self.paint_over(i)
@@ -1860,6 +2036,17 @@ class Paint:
                                    self.settings.get("highlight-colour", None))
         # A picture not begun shows in the gallery in its colours (or pale).
         self.colour_new = self.settings.get_bool("new-in-colour", True)
+        # «где?»: shown or not, and how many times a picture (0: no limit).
+        self.hint_shown = self.settings.get_bool("hint", True)
+        self.hint_limit = self.int_setting("hint-limit", 0, HINT_LIMITS)
+        self.hint_zoom = self.int_setting("hint-zoom", HINT_ZOOM, HINT_ZOOMS)
+        # Rings round the last regions of the chosen colour.
+        self.rings = self.settings.get_bool("rings", True)
+        # A sound and a buzz when a colour or the picture is done; the
+        # picture painted again before one's eyes at its end.
+        self.feedback = Feedback(SOUNDS, APP_ID, self.settings.get_bool("sound", True),
+                                 self.settings.get_bool("vibration", True))
+        self.replay = self.settings.get_bool("replay", True)
         # The kind of picture a preview makes, kept from one to the next.
         self.big_numbers, self.ink = True, 0
         self.pool = Workers(3)
@@ -2236,6 +2423,13 @@ class Paint:
                      os.path.join(DATA, "thumbs", pic["id"] + ".png")):
             try:
                 os.remove(path)
+            except OSError:
+                pass
+        # Its painting too, when no other kind of it is left.
+        key = pic["id"][3:].rsplit("-", 1)[0]
+        if not downloaded_any(key):
+            try:
+                os.remove(downloaded_original(key))
             except OSError:
                 pass
         self.show_gallery(rebuild=True)
@@ -2856,6 +3050,15 @@ class Paint:
                 return
             if not item.get("own"):
                 set_themes({item["qid"]: item["theme"]})
+            # The painting itself beside it, for «Оригинал» at its end.
+            original = downloaded_original(item["qid"])
+            if not os.path.exists(original):
+                try:
+                    pixbuf_of(item["data"], LARGE, LARGE).savev(original + ".new", "jpeg",
+                                                                ["quality"], ["85"])
+                    os.replace(original + ".new", original)
+                except (GLib.Error, OSError) as exc:
+                    sys.stderr.write("haltia-paint: %s: %s\n" % (original, exc))
             self.gallery_stale = True
             if "info" in item:
                 item["info"].set_text("✓ Уже в раскрасках")
@@ -2888,7 +3091,7 @@ class Paint:
         # finished picture to look at.
         tools = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         tools.get_style_context().add_class("tools")
-        for name, action, gap in (("find", self.find, False),
+        for name, action, gap in ((("find", self.find, False),) if self.hint_shown else ()) + (
                                   ("undo", self.board.undo_last, True),
                                   ("zoom-in", self.zoom_in, False),
                                   ("zoom-out", self.zoom_out, False),
@@ -2904,6 +3107,7 @@ class Paint:
         self.view_size = None
         self.zoom = None
         self.whole_back = None
+        self.found_number, self.found = None, []  # regions «где?» showed
         middle.pack_start(self.board, True, True, 0)
 
         pal_scroll = self.pal_scroll = Gtk.ScrolledWindow()
@@ -2932,12 +3136,17 @@ class Paint:
             self.swatches.append((b, left, fg))
         pal_scroll.add(pal)
         box.pack_start(pal_scroll, False, False, 0)
+        self.board_box = box
+        self.end_bar = None
 
         box.show_all()
         self.stack.add_named(box, "board")
         self.stack.set_visible_child_name("board")
         first = next((n for n in range(len(pic["palette"])) if self.board.left(n)), 0)
         self.choose(first)
+        if not any(self.board.left(n) for n in range(len(pic["palette"]))):
+            # Opened from Готовые: its end, without the sound and replay.
+            self.finished(celebrate=False)
 
     def tool(self, name, action):
         """A button with a drawn icon, white on blue while it is on; "find"
@@ -2952,15 +3161,31 @@ class Paint:
         def draw(widget, cr):
             ctx = b.get_style_context()
             light = ctx.has_class("accent") or ctx.has_class("on")
+            counted = name == "find" and self.hint_limit
+            # With a count under it, the icon moves up a little.
             cr.translate((widget.get_allocated_width() - 56) / 2,
-                         (widget.get_allocated_height() - 56) / 2)
+                         (widget.get_allocated_height() - 56) / 2 - (16 if counted else 0))
             draw_icon(cr, name, 56, (1.0, 1.0, 1.0) if light else (0.18, 0.2, 0.21))
+            if counted:
+                # How many times it is left, under the icon.
+                left = str(max(0, self.hint_limit - self.board.hints))
+                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+                cr.set_font_size(26)
+                ext = cr.text_extents(left)
+                cr.move_to(28 - ext.width / 2 - ext.x_bearing, 88)
+                cr.set_source_rgb(1, 1, 1)
+                cr.show_text(left)
             return False
 
         icon.connect("draw", draw)
         b.add(icon)
         if name == "whole":
             self.whole_button = b
+        if name == "undo":
+            self.undo_tool = b
+        if name == "find":
+            self.find_tool = b
+            self.hints_shown()
         if name == "look":
             # A tap shows the finished picture until the next; held, it
             # shows it while held.
@@ -2971,17 +3196,38 @@ class Paint:
             b.connect("clicked", lambda _b: action())
         return b
 
+    def hints_shown(self):
+        """«где?» greyed when its limit for the picture is used up."""
+        left = not self.hint_limit or self.board.hints < self.hint_limit
+        self.find_tool.set_sensitive(left)
+        self.find_tool.queue_draw()
+
     def find(self):
         """Centre the view on the nearest unpainted region of the chosen
-        colour, zoomed in far enough to read its number."""
-        i = self.board.nearest(*self.board.centre())
+        colour, zoomed in far enough to read its number; counted against
+        the limit of Настройки."""
+        if self.hint_limit and self.board.hints >= self.hint_limit:
+            return
+        # Tapped again, it goes on to the next region, not the same one;
+        # round again when all were shown.
+        b = self.board
+        if self.found_number != b.chosen:
+            self.found_number, self.found = b.chosen, []
+        todo = [i for i in b.of[b.chosen] if i not in b.filled]
+        if set(todo) <= set(self.found):
+            self.found = []
+        i = b.nearest(*b.centre(), shown=self.found)
         if i is None or not self.view_size:
             return
-        reg = self.board.regions[i]
+        self.found.append(i)
+        b.hints += 1
+        b.save_soon()
+        self.hints_shown()
+        reg = b.regions[i]
         self.forget_whole()
         steps = self.steps()
-        # A comfortable number: some 20 px.
-        want = 20 / (1.2 * max(reg.r, 0.5))
+        # A comfortable number: as large as Настройки say.
+        want = self.hint_zoom / (1.2 * max(reg.r, 0.5))
         index = max(self.zoom or 0,
                     next((k for k, z in enumerate(steps) if z >= want), len(steps) - 1))
         self.set_zoom(index, (reg.x, reg.y))
@@ -3082,7 +3328,10 @@ class Paint:
         done, total = share_done(self.board.pic, self.board.filled)
         self.title.set_text("%s · %d %%" % (self.board.pic["name"], 100 * done // total))
 
-    def region_painted(self, number):
+    def region_painted(self, number, tapped=True):
+        if self.board.left(number) == 0 and tapped:
+            if any(self.board.left(n) for n in range(len(self.board.pic["palette"]))):
+                self.feedback.colour_done()
         if self.board.left(number) == 0:
             colours = len(self.board.pic["palette"])
             # The next number with regions left, after this one, round.
@@ -3090,7 +3339,7 @@ class Paint:
                         if self.board.left((number + k) % colours)), None)
             if nxt is None:
                 self.refresh_swatches()
-                self.finished()
+                self.finished(celebrate=tapped)
                 return
             if number == self.board.chosen:
                 self.choose(nxt)
@@ -3115,16 +3364,75 @@ class Paint:
             (ctx.add_class if on else ctx.remove_class)("on")
             self.look_button.queue_draw()
 
-    def finished(self):
+    def finished(self, celebrate=True):
+        """The picture is done: the tune and buzz, the whole picture painted
+        again before one's eyes (Настройки), then its end: «Готово!» with
+        the buttons to keep it, see it again, see the painting itself and
+        go back. No dialog: the buttons stay on the screen."""
         self.save()
-        # The finished picture, without outlines and numbers.
-        self.board.show_finished()
-        while Gtk.events_pending():
-            Gtk.main_iteration()
-        if dialogs.ask(self.win, "Готово! Картина раскрашена.", "Сохранить в Галерею",
-                       "Закрыть"):
-            self.save_to_gallery(self.board.pic)
-        # It stays on the screen to look at; "←" goes to the gallery.
+        b = self.board
+        b.show_finished()
+        for tool in (getattr(self, "find_tool", None), self.undo_tool, self.look_button):
+            if tool:
+                tool.hide()
+        self.pal_scroll.hide()
+        self.show_end()
+        if celebrate:
+            self.feedback.picture_done()
+            if self.replay and b.order:
+                # The whole picture in view first, then painted again.
+                self.forget_whole()
+                self.set_zoom(0, smooth=False)
+                GLib.idle_add(lambda: b.start_replay() and False)
+
+    def show_end(self):
+        if self.end_bar:
+            return
+        bar = self.end_bar = Gtk.Box(spacing=16)
+        bar.get_style_context().add_class("palette")
+        done = Gtk.Label(label="Готово!")
+        done.get_style_context().add_class("end")
+        done.set_margin_start(16)
+        done.set_margin_end(16)
+        bar.pack_start(done, False, False, 0)
+        pic = self.board.pic
+        self.original_path = original_of(pic)
+        for label, action in (("Сохранить в Галерею", lambda: self.save_to_gallery(pic)),
+                              ("Посмотреть ещё раз", self.see_again),
+                              ("Оригинал", self.flip_original),
+                              ("К раскраскам", self.back)):
+            if label == "Оригинал" and not self.original_path:
+                continue
+            button = Gtk.Button(label=label)
+            button.get_style_context().add_class("grade")
+            button.connect("clicked", lambda _b, a=action: a())
+            if label == "Оригинал":
+                self.original_button = button
+            bar.pack_start(button, True, True, 0)
+        self.board_box.pack_start(bar, False, False, 0)
+        bar.show_all()
+
+    def see_again(self):
+        self.original_shown(False)
+        self.forget_whole()
+        self.set_zoom(0, smooth=False)
+        GLib.idle_add(lambda: self.board and self.board.start_replay() and False)
+
+    def flip_original(self):
+        self.original_shown(not self.board.original)
+
+    def original_shown(self, on):
+        """The painting itself in place of the picture, or the picture."""
+        pb = None
+        if on and self.original_path:
+            try:
+                pb = GdkPixbuf.Pixbuf.new_from_file_at_size(self.original_path, 1600, 1600)
+            except GLib.Error as exc:
+                sys.stderr.write("haltia-paint: %s: %s\n" % (self.original_path, exc))
+        self.board.set_original(pb)
+        if self.original_path:
+            ctx = self.original_button.get_style_context()
+            (ctx.add_class if pb else ctx.remove_class)("on")
 
     def save_to_gallery(self, pic):
         """The finished picture as a PNG among the pictures (Галерея shows
@@ -3156,10 +3464,21 @@ class Paint:
         threading.Thread(target=work, daemon=True).start()
 
     # settings
+    def int_setting(self, key, default, choices):
+        """A number of Настройки that is one of choices, else default."""
+        try:
+            value = int(self.settings.get(key, str(default)))
+        except ValueError:
+            return default
+        return value if value in dict(choices) else default
+
     def show_settings(self):
         """Настройки, in sections: Подсветка (how the chosen number's
         regions stand out, a pattern and its colour, each shown as it
-        looks) and Раскраски (how the gallery shows pictures not begun)."""
+        looks), Подсказки («где?»: shown, how often, how far it zooms; the
+        rings), Звук и вибрация, Конец картины (the replay) and Раскраски
+        (how the gallery shows pictures not begun). Each is kept at once
+        and holds from the next picture opened."""
         self.title.set_text("Настройки")
         self.back_button.show()
         self.find_button.hide()
@@ -3200,6 +3519,27 @@ class Paint:
                 row.attach(b, n % 5, n // 5, 1, 1)
                 self.look_buttons.append((b, key, value, sample))
             box.pack_start(row, False, False, 0)
+        section("Подсказки")
+        self.choice(box, "Кнопка «где?» (находит область выбранного цвета):",
+                    ((True, "Показывать"), (False, "Не показывать")), "hint", self.hint_shown,
+                    lambda v: setattr(self, "hint_shown", v))
+        self.choice(box, "Сколько раз «где?» на одной картине:", HINT_LIMITS, "hint-limit",
+                    self.hint_limit, lambda v: setattr(self, "hint_limit", v))
+        self.choice(box, "Насколько «где?» приближает:", HINT_ZOOMS, "hint-zoom",
+                    self.hint_zoom, lambda v: setattr(self, "hint_zoom", v))
+        self.choice(box, "Кольца вокруг последних %d областей цвета:" % RING_LEFT,
+                    ((True, "Показывать"), (False, "Не показывать")), "rings", self.rings,
+                    lambda v: setattr(self, "rings", v))
+        section("Звук и вибрация")
+        self.choice(box, "Когда закончен цвет или картина — звук:",
+                    ((True, "Включён"), (False, "Выключен")), "sound", self.feedback.sound,
+                    lambda v: setattr(self.feedback, "sound", v))
+        self.choice(box, "И вибрация:", ((True, "Включена"), (False, "Выключена")), "vibration",
+                    self.feedback.vibration, lambda v: setattr(self.feedback, "vibration", v))
+        section("Конец картины")
+        self.choice(box, "Картина раскрашивается ещё раз сама, за несколько секунд:",
+                    ((True, "Показывать"), (False, "Не показывать")), "replay", self.replay,
+                    lambda v: setattr(self, "replay", v))
         section("Раскраски")
         label = Gtk.Label(label="Картины, которые ещё не начаты:", xalign=0)
         label.get_style_context().add_class("pinfo")
@@ -3221,6 +3561,34 @@ class Paint:
         self.stack.add_named(scroll, "settings")
         self.stack.set_visible_child_name("settings")
         self.choose_look(None, None)
+
+    def choice(self, box, heading, options, key, current, keep):
+        """A row of buttons in Настройки, one of options [(value, name)]:
+        the one tapped is on, kept as key at once and given to keep."""
+        label = Gtk.Label(label=heading, xalign=0)
+        label.get_style_context().add_class("pinfo")
+        box.pack_start(label, False, False, 0)
+        row = Gtk.Box(spacing=14)
+        buttons = []
+
+        def show(value):
+            for b, v in buttons:
+                (b.get_style_context().add_class if v == value
+                 else b.get_style_context().remove_class)("on")
+
+        def chosen(value):
+            self.settings.set(key, value if isinstance(value, bool) else str(value))
+            keep(value)
+            show(value)
+
+        for value, name in options:
+            b = Gtk.Button(label=name)
+            b.get_style_context().add_class("grade")
+            b.connect("clicked", lambda _b, v=value: chosen(v))
+            row.pack_start(b, False, False, 0)
+            buttons.append((b, value))
+        box.pack_start(row, False, False, 0)
+        show(current)
 
     def draw_look(self, widget, cr, key, value):
         """A sample of a choice: a patch of it with a number on it, as the

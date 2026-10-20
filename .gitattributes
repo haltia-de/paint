@@ -3,3 +3,5 @@
 b8k-* text eol=lf
 haltia-* text eol=lf
 *.svgz binary
+*.oga binary
+*.jpg binary

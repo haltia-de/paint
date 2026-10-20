@@ -1,5 +1,23 @@
 # Что нового · What's new
 
+## 4.6.0 (2026-10-20)
+
+### Русский
+
+- Когда у цвета остаются последние три области, вокруг каждой появляется синее кольцо: их видно даже на всей картине. Повторное нажатие «где?» ведёт к следующей области.
+- В «Настройках» появились «Подсказки»: кнопку «где?» можно спрятать, ограничить (3, 5 или 10 раз на картину — сколько осталось, написано на кнопке) и выбрать, насколько она приближает; кольца тоже можно выключить.
+- Закончен цвет — мягкий звон и короткая вибрация. Закончена картина — мелодия, и картина сама раскрашивается ещё раз за несколько секунд (нажатие пропускает).
+- В конце вместо окна — «Готово!» и кнопки на экране: «Сохранить в Галерею», «Посмотреть ещё раз», «Оригинал» (сама картина, с которой сделана раскраска) и «К раскраскам». Готовая картина, открытая снова, показывает то же.
+- Звук, вибрацию и повтор в конце можно выключить в «Настройках».
+
+### English
+
+- When a colour has its last three regions left, each gets a blue ring, seen even on the whole picture. Tapping "where?" again goes on to the next region.
+- Настройки have «Подсказки» (hints): "where?" can be hidden, limited (3, 5 or 10 times a picture, the count left shown on it) and set to zoom more or less; the rings can be turned off too.
+- A colour done gives a soft bell and a short buzz. A picture done gives a short tune, and the picture paints itself again in a few seconds (a tap skips it).
+- At the end, instead of a dialog, «Готово!» (done) and buttons on the screen: save to Галерея, see it again, «Оригинал» (the painting the picture was made from) and back to the pictures. A finished picture opened again shows the same.
+- Sound, buzz and the replay can be turned off in Настройки.
+
 ## 4.5.0 (2026-10-20)
 
 ### Русский

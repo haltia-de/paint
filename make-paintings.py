@@ -3,6 +3,7 @@
 """Turn public-domain paintings into the built-in haltia-paint pictures.
 
   make-paintings.py CACHE_DIR [SLUG...]
+  make-paintings.py --originals CACHE_DIR [SLUG...]
 
 downloads each painting from Wikimedia Commons (1200 px wide), or each
 drawing from OpenClipart, into CACHE_DIR, then writes
@@ -10,7 +11,10 @@ pictures/<slug>.svgz with pbn.py: level 2 of about 120 regions, 3 of
 about 300, 4 of about 600 (see LEVELS there). The paintings and prints
 are by artists who died more than 70 years ago, so they are in the
 public domain; OpenClipart drawings are CC0. PAINTINGS names each source.
-Needs numpy and scipy, and cairosvg for the drawings.
+Needs numpy and scipy, and cairosvg for the drawings. With --originals
+it writes pictures/originals/<slug>.jpg instead, the painting itself as
+the picture was cut from it (pbn.shrink: the same crop and margins),
+ORIGINAL px on its long side, for «Оригинал» at a picture's end.
 """
 import os
 import sys
@@ -26,6 +30,8 @@ import pbn
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pictures")
 # Wikimedia asks for a User-Agent that says who is asking.
 AGENT = "haltia-paint/4.3 (https://github.com/haltia-de/paint)"
+# The long side of the originals, and their JPEG quality: some 80 kB each.
+ORIGINAL, QUALITY = 800, 80
 
 # slug, source, name, theme, level, and optionally the part to use (x0,
 # y0, x1, y1 as fractions: no text, no book margins). The source is a
@@ -260,11 +266,20 @@ def fetch(cache, name):
 
 
 def main():
-    cache = sys.argv[1]
-    only = set(sys.argv[2:])
+    originals = sys.argv[1:2] == ["--originals"]
+    args = sys.argv[2:] if originals else sys.argv[1:]
+    cache = args[0]
+    only = set(args[1:])
     os.makedirs(cache, exist_ok=True)
     for slug, name, title, theme, level, *crop in PAINTINGS:
         if only and slug not in only:
+            continue
+        if originals:
+            rgb = pbn.shrink(Image.open(fetch(cache, name)), ORIGINAL, crop[0] if crop else None)
+            os.makedirs(os.path.join(OUT, "originals"), exist_ok=True)
+            Image.fromarray(rgb).save(os.path.join(OUT, "originals", slug + ".jpg"),
+                                      quality=QUALITY, optimize=True, progressive=True)
+            print(slug, rgb.shape[1], rgb.shape[0])
             continue
         level = LEVEL[level]
         regions, colours, detail = pbn.LEVELS[level]

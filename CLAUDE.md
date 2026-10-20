@@ -77,8 +77,15 @@ answers 429 when downloading many files; `make-paintings.py` retries.
     gallery header), kept by `haltia_kit.settings` in
     `~/.config/haltia/paint.conf` (`highlight`, `highlight-colour`, and
     `new-in-colour`: pictures not begun shown in colour in the gallery;
-    also `gallery-order`, chosen above the gallery). Outlines are
+    also `gallery-order`, chosen above the gallery; `hint`, `hint-limit`,
+    `hint-zoom` for «где?», `rings`, `sound`, `vibration`, `replay`).
+    Outlines are
     `INK_PREVIEW`, a softer grey, in the preview and gallery.
+  - `haltia_paint/feedback.py` — Отклик: a sound (`data/sounds/*.oga`,
+    made by `data/sounds/make-sounds.py`, played by `paplay`: the tablet
+    has PulseAudio but not GStreamer's PulseAudio output) and a buzz
+    (feedbackd over D-Bus with the "quiet" profile, so it only
+    vibrates) when a colour or the picture is done.
   - `haltia_paint/sections.py` — Разделы галереи: the gallery's sections
     by theme (`THEMES`, easier first within) or by difficulty (`BANDS`
     of region counts), with Продолжить (pictures begun, also left in
@@ -103,6 +110,10 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   lists slug, Commons file name, Russian title, theme, level; all are made
   with big numbers, those in `INK` with their own black outlines (level 1,
   or 2 for those also in `INK_MORE`).
+- `pictures/originals/<slug>.jpg` — the paintings the built-ins were
+  cut from (`make-paintings.py --originals`, through `pbn.shrink`, 800
+  px), for «Оригинал» at a picture's end; a downloaded picture keeps
+  its painting as `downloaded/<item>.jpg`.
 - `pictures/*.svgz` — built-in pictures, gzipped SVG: one `<path>` per
   region (`fill-rule` evenodd, holes as inner rings, `M x y x y ...Z`) with
   `data-n` (colour number from 1, light to dark) and `data-label` "x y r"
@@ -159,7 +170,9 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   `wd-<QID>-<kind>` (kind: level, then `b` for big numbers, `k` per ink
   level, e.g. `3bk`, `4bkk`; before 4.3 only the level). Progress lives in
   `~/.local/share/haltia-paint/progress/<id>.json` as `{"count", "sig",
-  "filled": [region indexes]}`; a count or `sig` mismatch resets it (a
+  "filled": [region indexes], "hints": times «где?» was used, "order":
+  [the regions in the order painted, for the replay]}` (the last two
+  since 4.6); a count or `sig` mismatch resets it (a
   picture made again). `last` stores the last opened id.
 - **Preview kinds**: a grade plus «Крупные номера» (on or off) and
   «Контуры: нет / мало / много» (ink 0/1/2) (`Paint.kind()`, kept between

@@ -1,3 +1,12 @@
+haltia-paint (4.6.0) unstable; urgency=medium
+
+  * Rings round the last regions of a colour; «где?» goes on to the next,
+    can be hidden, limited per picture and zoom more or less; a bell and
+    a buzz when a colour is done, a tune and the picture painted again at
+    its end; «Готово!» with buttons instead of a dialog, «Оригинал».
+
+ -- Haltia <rensomail@gmail.com>  Tue, 20 Oct 2026 19:00:00 +0300
+
 haltia-paint (4.5.0) unstable; urgency=medium
 
   * Gallery by theme or by difficulty, with Продолжить and Готовые; themes
