@@ -1,3 +1,10 @@
+haltia-paint (4.4.0) unstable; urgency=medium
+
+  * Thinner stripes and bright highlight colours; pictures not begun in
+    colour in the gallery; softer outlines in the preview and gallery.
+
+ -- Haltia <rensomail@gmail.com>  Tue, 20 Oct 2026 15:15:00 +0300
+
 haltia-paint (4.3.0) unstable; urgency=medium
 
   * Pictures made anew: regions follow the shapes, numbers in the middle

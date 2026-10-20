@@ -18,13 +18,19 @@ import cairo
 
 STYLES = (("hatch", "Штриховка"), ("checker", "Шахматка"), ("fill", "Заливка"))
 COLOURS = (("grey", "Серый"), ("blue", "Голубой"), ("yellow", "Жёлтый"),
-           ("number", "Цвет номера"))
+           ("number", "Цвет номера"),
+           # Bright ones a painting hardly has, so they stand out on any.
+           ("magenta", "Малиновый"), ("violet", "Фиолетовый"), ("turquoise", "Бирюзовый"),
+           ("lime", "Салатовый"), ("orange", "Оранжевый"))
 DEFAULT = ("hatch", "grey")
 # The colours to choose, as the stripes or squares are drawn.
-INKS = {"grey": (0.40, 0.40, 0.43), "blue": (0.20, 0.47, 0.90), "yellow": (0.93, 0.72, 0.05)}
+INKS = {"grey": (0.40, 0.40, 0.43), "blue": (0.20, 0.47, 0.90), "yellow": (0.93, 0.72, 0.05),
+        "magenta": (0.86, 0.08, 0.55), "violet": (0.50, 0.22, 0.90),
+        "turquoise": (0.00, 0.70, 0.72), "lime": (0.50, 0.82, 0.00),
+        "orange": (1.00, 0.45, 0.00)}
 # Pixels on the screen of one repeat of the pattern.
 CELL = 12
-LIGHT, DARK = (0.97, 0.97, 0.96), (0.24, 0.24, 0.26)
+LIGHT, DARK = (0.97, 0.97, 0.96), (0.16, 0.16, 0.18)
 
 
 def luminance(rgb):
@@ -68,7 +74,8 @@ class Mark:
             cr.rectangle(half, half, half, half)
             cr.fill()
         else:
-            cr.set_line_width(CELL * 0.27)
+            # Thin lines, mostly ground between them: calm, still clear.
+            cr.set_line_width(CELL * 0.14)
             for d in (-CELL, 0, CELL):
                 cr.move_to(d, CELL)
                 cr.line_to(d + CELL, 0)

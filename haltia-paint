@@ -215,8 +215,11 @@ TOPICS = ("Шишкин", "Айвазовский", "Левитан", "Куин�
           "зима", "река", "натюрморт", "кошка", "собака", "лошадь", "птицы", "корабль")
 
 # The chosen number's regions: light accent blue, the same for every colour.
-# A picture's own outlines (pbn.py --ink), black.
+# A picture's own outlines (pbn.py --ink), black; a softer dark grey in the
+# preview and the gallery, where the whole picture is small and black
+# lines stood out.
 INK = (34 / 255, 30 / 255, 28 / 255)
+INK_PREVIEW = (0.36, 0.34, 0.33)
 
 CSS = b"""
 window, .paint-bg { background-color: #e6e6e4; }
@@ -773,11 +776,12 @@ def grey(rgb):
 _NUMBER_AT = {}
 
 
-def draw_regions(cr, pic, scale, regions, fill, outline=None, number=None):
+def draw_regions(cr, pic, scale, regions, fill, outline=None, number=None, ink=INK):
     """Draw these regions (indexes) of a picture at scale: fill(i) gives a
     region's colour or a highlight's Mark (no fill when None), outline(i)
     whether it gets a grey outline, number(i) None or (colour, bold) or
-    (colour, bold, halo) for its number."""
+    (colour, bold, halo) for its number; ink: the colour of the picture's
+    own outlines."""
     regs = regions_of(pic)
     cr.save()
     cr.scale(scale, scale)
@@ -814,7 +818,7 @@ def draw_regions(cr, pic, scale, regions, fill, outline=None, number=None):
             cr.clip()
             cr.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
         cr.append_path(pic["ink"])
-        cr.set_source_rgb(*INK)
+        cr.set_source_rgb(*ink)
         cr.fill()
         cr.restore()
     cr.restore()
@@ -850,7 +854,7 @@ def draw_regions(cr, pic, scale, regions, fill, outline=None, number=None):
                 cr.show_text(text)
 
 
-def whole_picture(pic, width, height, fill, outline=None):
+def whole_picture(pic, width, height, fill, outline=None, ink=INK):
     """The picture fitted into width x height, as a surface of its size."""
     scale = min(width / pic["w"], height / pic["h"])
     image = cairo.ImageSurface(cairo.FORMAT_RGB24, max(1, round(pic["w"] * scale)),
@@ -858,13 +862,16 @@ def whole_picture(pic, width, height, fill, outline=None):
     cr = cairo.Context(image)
     cr.set_source_rgb(1, 1, 1)
     cr.paint()
-    draw_regions(cr, pic, scale, range(len(regions_of(pic))), fill, outline)
+    draw_regions(cr, pic, scale, range(len(regions_of(pic))), fill, outline, ink=ink)
     return image
 
 
-def thumbnail(pic, filled, finished):
-    """The gallery picture, kept as a PNG until the progress changes."""
-    path = os.path.join(DATA, "thumbs", pic["id"] + ".png")
+def thumbnail(pic, filled, finished, colour_new=False):
+    """The gallery picture, kept as a PNG until the progress changes; one
+    not begun in its colours with colour_new (Настройки), else pale."""
+    finished = finished or (colour_new and not filled)
+    path = os.path.join(DATA, "thumbs", pic["id"] + ("-colour" if finished and not filled else "")
+                        + ".png")
     try:
         newest = max(pic.get("mtime", 0), os.path.getmtime(progress_path(pic)))
     except OSError:
@@ -880,7 +887,7 @@ def thumbnail(pic, filled, finished):
     # Still to paint: a pale version, so the picture shows.
     pale = [(0.72 + 0.28 * r, 0.72 + 0.28 * g, 0.72 + 0.28 * b) for r, g, b in full]
     image = whole_picture(pic, 320, 220, lambda i: (full if finished or i in filled else pale)
-                          [regs[i].n])
+                          [regs[i].n], ink=INK_PREVIEW)
     if not loaded:
         # Not needed again until the picture is opened.
         drop_regions(pic)
@@ -1810,6 +1817,8 @@ class Paint:
         self.settings = Settings("paint")
         self.highlight = Highlight(self.settings.get("highlight", None),
                                    self.settings.get("highlight-colour", None))
+        # A picture not begun shows in the gallery in its colours (or pale).
+        self.colour_new = self.settings.get_bool("new-in-colour", True)
         # The kind of picture a preview makes, kept from one to the next.
         self.big_numbers, self.ink = True, 0
         self.pool = Workers(3)
@@ -2063,7 +2072,7 @@ class Paint:
     def make_thumb(self, pic, filled, finished, widget):
         """In the thumbnail thread: the thumbnail, then shown."""
         try:
-            image = thumbnail(pic, filled, finished)
+            image = thumbnail(pic, filled, finished, self.colour_new)
         except Exception as exc:  # a broken file must not stop the thread
             sys.stderr.write("haltia-paint: %s: %s\n" % (pic["id"], exc))
             return
@@ -2553,7 +2562,7 @@ class Paint:
             if pic:
                 pic["image"] = whole_picture(
                     pic, 640, 520, lambda i, p=pic: hex_rgb(p["palette"][p["regions"][i].n]),
-                    lambda i: True)
+                    lambda i: True, ink=INK_PREVIEW)
                 drop_regions(pic)
             GLib.idle_add(made, pic)
 
@@ -2945,11 +2954,12 @@ class Paint:
             label = Gtk.Label(label=heading, xalign=0)
             label.get_style_context().add_class("pinfo")
             box.pack_start(label, False, False, 0)
-            row = Gtk.Box(spacing=14, homogeneous=True)
-            for value, name in choices:
+            # Five to a row, so they fit the tablet's screen.
+            row = Gtk.Grid(row_spacing=14, column_spacing=14, column_homogeneous=True)
+            for n, (value, name) in enumerate(choices):
                 inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
                 sample = Gtk.DrawingArea()
-                sample.set_size_request(150, 90)
+                sample.set_size_request(150, 80)
                 sample.connect("draw", self.draw_look, key, value)
                 inner.pack_start(sample, False, False, 0)
                 inner.pack_start(Gtk.Label(label=name), False, False, 0)
@@ -2957,9 +2967,21 @@ class Paint:
                 b.add(inner)
                 b.get_style_context().add_class("grade")
                 b.connect("clicked", lambda _b, k=key, v=value: self.choose_look(k, v))
-                row.pack_start(b, True, True, 0)
+                row.attach(b, n % 5, n // 5, 1, 1)
                 self.look_buttons.append((b, key, value, sample))
             box.pack_start(row, False, False, 0)
+        label = Gtk.Label(label="Картины, которые ещё не начаты, в галерее:", xalign=0)
+        label.get_style_context().add_class("pinfo")
+        box.pack_start(label, False, False, 0)
+        row = Gtk.Box(spacing=14)
+        self.new_buttons = []
+        for on, name in ((True, "В цвете, как картина"), (False, "Бледные")):
+            b = Gtk.Button(label=name)
+            b.get_style_context().add_class("grade")
+            b.connect("clicked", lambda _b, v=on: self.choose_new(v))
+            row.pack_start(b, False, False, 0)
+            self.new_buttons.append((b, on))
+        box.pack_start(row, False, False, 0)
         box.show_all()
         self.stack.add_named(box, "settings")
         self.stack.set_visible_child_name("settings")
@@ -3006,10 +3028,23 @@ class Paint:
             on = v == (self.highlight.style if k == "style" else self.highlight.colour)
             (b.get_style_context().add_class if on else b.get_style_context().remove_class)("on")
             sample.queue_draw()
+        self.choose_new(None)
+
+    def choose_new(self, on):
+        """How pictures not begun show in the gallery (None: just show
+        which is chosen)."""
+        if on is not None and on != self.colour_new:
+            self.colour_new = on
+            self.settings.set("new-in-colour", on)
+            self.gallery_stale = True
+        for b, v in self.new_buttons:
+            (b.get_style_context().add_class if v == self.colour_new
+             else b.get_style_context().remove_class)("on")
 
     def back(self):
         if self.stack.get_visible_child_name() == "settings":
-            self.show_gallery()
+            stale, self.gallery_stale = self.gallery_stale, False
+            self.show_gallery(rebuild=stale)
             return
         if self.stack.get_visible_child_name() == "preview":
             if self.preview_item and self.preview_item.get("own"):

@@ -1,5 +1,19 @@
 # Что нового · What's new
 
+## 4.4.0 (2026-10-20)
+
+### Русский
+
+- Штриховка выбранного цвета стала тоньше, а для подсветки есть яркие цвета, каких на картинах почти не бывает: малиновый, фиолетовый, бирюзовый, салатовый и оранжевый.
+- Картины, которые ещё не начаты, показываются в галерее в цвете; в «Настройках» можно вернуть бледные.
+- Чёрные контуры в предпросмотре и в галерее стали мягче, тёмно-серыми.
+
+### English
+
+- The stripes of the chosen colour are thinner, and the highlight has bright colours a painting hardly has: crimson, violet, turquoise, lime and orange.
+- Pictures not begun show in colour in the gallery; Настройки can make them pale again.
+- Black outlines are softer, dark grey, in the preview and the gallery.
+
 ## 4.3.0 (2026-10-20)
 
 ### Русский

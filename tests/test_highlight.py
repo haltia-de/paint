@@ -50,6 +50,10 @@ class HighlightTest(unittest.TestCase):
         self.assertEqual(px[1][1], px[1][1 + CELL])
         self.assertNotEqual(px[1][1], px[1][1 + CELL // 2])
 
+    def test_every_colour_has_an_ink(self):
+        from haltia_paint.highlight import INKS
+        self.assertEqual({c for c, _n in COLOURS} - {"number"}, set(INKS))
+
     def test_light_colour_on_dark_ground(self):
         # Yellow stripes would vanish on white: they get a dark ground.
         px = draw(Highlight("hatch", "yellow").mark((0, 0, 0)).source(1.0))

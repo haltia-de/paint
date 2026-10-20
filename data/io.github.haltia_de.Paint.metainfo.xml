@@ -19,6 +19,20 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
+    <release version="4.4.0" date="2026-10-20">
+      <description>
+        <ul>
+          <li>The stripes of the chosen colour are thinner, and the highlight has bright colours a painting hardly has: crimson, violet, turquoise, lime and orange.</li>
+          <li>Pictures not begun show in colour in the gallery; Настройки can make them pale again.</li>
+          <li>Black outlines are softer, dark grey, in the preview and the gallery.</li>
+        </ul>
+        <ul>
+          <li xml:lang="ru">Штриховка выбранного цвета стала тоньше, а для подсветки есть яркие цвета, каких на картинах почти не бывает: малиновый, фиолетовый, бирюзовый, салатовый и оранжевый.</li>
+          <li xml:lang="ru">Картины, которые ещё не начаты, показываются в галерее в цвете; в «Настройках» можно вернуть бледные.</li>
+          <li xml:lang="ru">Чёрные контуры в предпросмотре и в галерее стали мягче, тёмно-серыми.</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.3.0" date="2026-10-20">
       <description>
         <ul>

@@ -70,11 +70,14 @@ answers 429 when downloading many files; `make-paintings.py` retries.
     stopped and started again for urgent work, cancel, timeout, progress
     from `pbn.py --progress`). `tests/fake_pbn.py` stands in for pbn.py.
   - `haltia_paint/highlight.py` — Подсветка: how the chosen number's
-    regions stand out (a pattern, `STYLES`, in a colour, `COLOURS`; grey
-    stripes by default; the pattern keeps `CELL` px at every zoom). A plain
-    light blue got lost next to painted regions of a like colour. Chosen in
-    Настройки (⚙ in the gallery header), kept by `haltia_kit.settings` in
-    `~/.config/haltia/paint.conf` (`highlight`, `highlight-colour`).
+    regions stand out (a pattern, `STYLES`, in a colour, `COLOURS`, among
+    them bright ones a painting hardly has; thin grey stripes by default;
+    the pattern keeps `CELL` px at every zoom). A plain light blue got lost
+    next to painted regions of a like colour. Chosen in Настройки (⚙ in the
+    gallery header), kept by `haltia_kit.settings` in
+    `~/.config/haltia/paint.conf` (`highlight`, `highlight-colour`, and
+    `new-in-colour`: pictures not begun shown in colour in the gallery).
+    Outlines are `INK_PREVIEW`, a softer grey, in the preview and gallery.
 - `pbn.py` — the region generator (raster to paint-by-number SVG), used by
   `make-paintings.py` as a module and by the program as a subprocess.
 - `bench/` — стенд генератора: `bench.py CACHE OUT [--fetch]` runs the
