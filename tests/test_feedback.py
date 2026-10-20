@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from haltia_paint.feedback import COLOUR_EVENT, PICTURE_EVENT, Feedback  # noqa: E402
+from haltia_paint.feedback import COLOUR_EVENT, PICTURE_EVENT, TAP_EVENT, Feedback  # noqa: E402
 
 SOUNDS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data",
                       "sounds")
@@ -37,6 +37,35 @@ class FeedbackTest(unittest.TestCase):
         f = self.make(sound=False)
         f.missed()
         self.assertEqual(self.played, [])
+
+    def test_taps_buzz_only_when_the_shell_leaves_them(self):
+        with tempfile.TemporaryDirectory() as d:
+            quiet = os.path.join(d, "quiet-taps")
+            conf = os.path.join(d, "touchguard.conf")
+            with open(conf, "w") as fh:
+                fh.write("# taps\nbuzz_ms = 70\n")
+            f = self.make(quiet_taps=quiet, touchguard=conf)
+            f.tapped()
+            self.assertEqual(self.buzzed, [])  # the shell buzzes them
+            open(quiet, "w").close()
+            f.tapped()
+            self.assertEqual(self.buzzed, [("app.id", TAP_EVENT)])
+            f.missed()
+            self.assertEqual(len(self.buzzed), 1)  # a miss is not felt
+            f.hit()
+            self.assertEqual(len(self.buzzed), 2)
+            for taps, felt in (("miss", [False, True]), ("both", [True, True]),
+                               ("none", [False, False])):
+                f.taps, self.buzzed[:] = taps, []
+                f.hit()
+                hit = bool(self.buzzed)
+                f.missed()
+                self.assertEqual([hit, len(self.buzzed) > hit], felt, taps)
+            with open(conf, "w") as fh:
+                fh.write("buzz_ms = 0\n")
+            f = self.make(quiet_taps=quiet, touchguard=conf)
+            f.tapped()
+            self.assertEqual(self.buzzed, [])  # taps buzz nowhere then
 
     def test_each_can_be_off(self):
         f = self.make(sound=False)

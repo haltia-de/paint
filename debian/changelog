@@ -1,3 +1,10 @@
+haltia-paint (4.7.1) unstable; urgency=medium
+
+  * The program buzzes its own taps, not a miss (X-Haltia-Own-Feedback,
+    haltia-shell 2.8); Настройки choose which taps on the picture buzz.
+
+ -- Haltia <rensomail@gmail.com>  Tue, 20 Oct 2026 19:45:00 +0300
+
 haltia-paint (4.7.0) unstable; urgency=medium
 
   * Настройки while painting; Продолжить and Готовые in colour beside the

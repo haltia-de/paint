@@ -36,9 +36,10 @@ bottom has one big button per number. Pick a colour, tap its regions.
   first): a finger that does not move taps, unless another one was on
   the screen just then; one lying still for a while (a thumb holding
   the tablet, or one whose lift was lost after a palm) is left out.
-- A wrong tap gets a red outline for a second and a quiet low sound (no
-  buzz of the program's own: the shell buzzes every tap alike); there is
-  no timer, no score, no ads.
+- A wrong tap gets a red outline for a second and a quiet low sound, and
+  no buzz: the program buzzes its own taps (buttons, a right tap) while
+  the Haltia shell leaves them to it (X-Haltia-Own-Feedback, shell 2.8);
+  there is no timer, no score, no ads.
 - Progress is saved after every tap, so a picture can wait for tomorrow;
   the program starts on the last picture, unless it is finished.
 - At a picture's end: a short tune and a longer buzz, the picture painted
@@ -70,8 +71,9 @@ again starts again rather than taking another's progress; gallery
 thumbnails are kept as PNG files.
 
 It is a GTK application, io.github.haltia_de.Paint (io.github.trudenboy.Paint
-before 4.0), for any desktop; on the Haltia tablet shell the shell buzzes
-the touches and its GTK theme gives the large header and dialogs, and it
+before 4.0), for any desktop; on the Haltia tablet shell its GTK theme gives the
+large header and dialogs (and from 2.8 it leaves the tap buzz to the
+program), and it
 closes the program with its own ✕; elsewhere the header has the desktop's
 window buttons. Its folders were called b8k-paint before 4.0 and move on the first start.
 
@@ -146,7 +148,7 @@ gi.require_version("GLibUnix", "2.0")
 gi.require_version("GdkPixbuf", "2.0")
 from haltia_kit import dialogs, paths  # noqa: E402
 from haltia_kit.settings import Settings  # noqa: E402
-from gi.repository import Gdk, GdkPixbuf, Gio, GLibUnix, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, GdkPixbuf, Gio, GLibUnix, GObject, Gtk, Pango  # noqa: E402
 
 # Installed as PREFIX/bin/haltia-paint: the pictures are in
 # PREFIX/share/haltia-paint, the generator in PREFIX/lib/haltia-paint; in a
@@ -1857,6 +1859,9 @@ class Board(Gtk.DrawingArea):
         self.counts[self.chosen] -= 1
         self.undo.append(i)
         self.order.append(i)
+        if self.counts[self.chosen]:
+            # Felt as a tap (a colour done has a buzz of its own).
+            self.app.feedback.hit()
         self.paint_over(i)
         self.save_soon()
         self.app.region_painted(self.chosen)
@@ -2073,8 +2078,12 @@ class Paint:
         # picture painted again before one's eyes at its end.
         self.feedback = Feedback(SOUNDS, APP_ID, self.settings.get_bool("sound", True),
                                  self.settings.get_bool("vibration", True),
-                                 self.settings.get_bool("miss-sound", True))
+                                 self.settings.get_bool("miss-sound", True),
+                                 taps=self.settings.get("tap-buzz", "hit"))
         self.replay = self.settings.get_bool("replay", True)
+        # Every button tapped is felt: the shell leaves taps to the program
+        # while it is in front (X-Haltia-Own-Feedback), misses unfelt.
+        GObject.add_emission_hook(Gtk.Button, "clicked", self.button_felt)
         # The kind of picture a preview makes, kept from one to the next.
         self.big_numbers, self.ink = True, 0
         self.pool = Workers(3)
@@ -3517,6 +3526,10 @@ class Paint:
         threading.Thread(target=work, daemon=True).start()
 
     # settings
+    def button_felt(self, *_args):
+        self.feedback.tapped()
+        return True  # keep the hook
+
     def int_setting(self, key, default, choices):
         """A number of Настройки that is one of choices, else default."""
         try:
@@ -3596,9 +3609,13 @@ class Paint:
         self.choice(box, "Когда закончен цвет или картина — звук:",
                     ((True, "Включён"), (False, "Выключен")), "sound", self.feedback.sound,
                     lambda v: setattr(self.feedback, "sound", v))
-        self.choice(box, "И вибрация:", ((True, "Включена"), (False, "Выключена")), "vibration",
+        self.choice(box, "Когда закончен цвет или картина — вибрация:", ((True, "Включена"), (False, "Выключена")), "vibration",
                     self.feedback.vibration, lambda v: setattr(self.feedback, "vibration", v))
-        self.choice(box, "Нажатие не на ту область — тихий звук (без вибрации):",
+        self.choice(box, "Вибрация при нажатии на картину (с оболочкой Haltia 2.8):",
+                    (("hit", "На верное"), ("miss", "На промах"), ("both", "На оба"),
+                     ("none", "Нет")), "tap-buzz", self.feedback.taps,
+                    lambda v: setattr(self.feedback, "taps", v))
+        self.choice(box, "Нажатие не на ту область — тихий звук:",
                     ((True, "Включён"), (False, "Выключен")), "miss-sound", self.feedback.miss,
                     lambda v: setattr(self.feedback, "miss", v))
         section("Конец картины")

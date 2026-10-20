@@ -12,4 +12,7 @@ Keywords=colouring;coloring;paint by number;раскраска;картины;п
 StartupNotify=true
 X-Flatpak-RenamedFrom=io.github.trudenboy.Paint.desktop;
 X-B8K-Home=true
+# The program buzzes its own taps (a miss does not): the shell's tap buzz
+# stays off while it is in front (haltia-shell 2.8).
+X-Haltia-Own-Feedback=true
 X-B8K-Replaces=paint;io.github.trudenboy.Paint;

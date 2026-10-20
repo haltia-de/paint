@@ -1,5 +1,15 @@
 # Что нового · What's new
 
+## 4.7.1 (2026-10-20)
+
+### Русский
+
+Промах больше не вибрирует: «Раскраска» сама вибрирует на верные нажатия и на кнопки, а оболочка Haltia (с версии 2.8) перестаёт вибрировать за неё. В «Настройках» можно выбрать, на что вибрировать при нажатии на картину: на верное, на промах, на оба или ни на что. С оболочкой постарше всё остаётся как было.
+
+### English
+
+A miss no longer buzzes: Раскраска buzzes right taps and buttons itself, and the Haltia shell (from 2.8) stops buzzing for it. Настройки choose which taps on the picture buzz: right ones, misses, both or none. With an older shell everything stays as it was.
+
 ## 4.7.0 (2026-10-20)
 
 ### Русский

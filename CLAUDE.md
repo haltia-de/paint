@@ -23,7 +23,10 @@ Since 4.0 (ADR 0004, repo haltia-de/paint) the package is `haltia-paint`
 `b8k-paint` command is a link, `data/io.github.trudenboy.Paint.desktop` is a
 hidden entry, and `main()` moves `~/.local/share/b8k-paint` to `haltia-paint`
 (`haltia_kit.paths.migrate_dirs`).
-The shell buzzes touches and its GTK theme sizes the header and dialogs. Don't
+The shell's GTK theme sizes the header and dialogs. The shell buzzes every
+tap, except for a program whose .desktop says `X-Haltia-Own-Feedback=true`
+(haltia-shell 2.8): this one does, so it buzzes its own taps (buttons,
+right taps on the board, through `Feedback.tapped`) and not a miss. Don't
 edit the lenovo repo; tell its session the new tag.
 
 ## Running and installing
@@ -81,7 +84,8 @@ answers 429 when downloading many files; `make-paintings.py` retries.
     `new-in-colour`: pictures not begun shown in colour in the gallery;
     also `gallery-order`, chosen above the gallery; `hint`, `hint-limit`,
     `hint-zoom` for «где?», `rings`, `finger` (how far beside a region a
-    tap paints it), `sound`, `vibration`, `miss-sound`, `replay`).
+    tap paints it), `sound`, `vibration`, `tap-buzz` (which taps on the board buzz: `hit`,
+    `miss`, `both`, `none`), `miss-sound`, `replay`).
     Outlines are
     `INK_PREVIEW`, a softer grey, in the preview and gallery.
   - `haltia_paint/feedback.py` — Отклик: a sound (`data/sounds/*.oga`,
@@ -89,7 +93,8 @@ answers 429 when downloading many files; `make-paintings.py` retries.
     has PulseAudio but not GStreamer's PulseAudio output) and a buzz
     (feedbackd over D-Bus with the "quiet" profile, so it only
     vibrates) when a colour or the picture is done; a quiet sound and
-    no buzz for a miss (the shell's touchguard buzzes every tap anyway).
+    no buzz for a miss; `tapped()` buzzes the other taps, only while the
+    shell leaves them to the program (`$XDG_RUNTIME_DIR/haltia/quiet-taps`).
   - `haltia_paint/sections.py` — Разделы галереи: the gallery's sections
     by theme (`THEMES`, easier first within) or by difficulty (`BANDS`
     of region counts), with Продолжить (pictures begun, also left in

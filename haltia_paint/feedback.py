@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0
 """Отклик: a sound and a buzz when a colour or the whole picture is done,
-and a quiet sound, no buzz, for a tap on a region of another colour.
+a quiet sound, no buzz, for a tap on a region of another colour, and the
+short buzz of every other tap.
 
     feedback = Feedback(sounds_folder, app_id, sound=True, vibration=True,
                         miss=True)
     feedback.colour_done()
     feedback.picture_done()
-    feedback.missed()
+    feedback.missed()   # a tap on a region of another colour
+    feedback.tapped()   # a button
+    feedback.hit()      # a region painted
 
 The sound is one of the program's own files (colour.oga, picture.oga,
 miss.oga), played by paplay in a process of its own: the tablet runs PulseAudio and
@@ -17,7 +20,15 @@ it stays silent.
 The buzz is an event of feedbackd (the tablet shell's), over D-Bus, with
 the "quiet" profile so feedbackd only vibrates and plays no sound of its
 own; feedbackd's own level (silent) still wins. Without feedbackd
-nothing buzzes. Each is tried and forgotten: nothing here waits or fails.
+nothing buzzes.
+
+The tap buzz: the Haltia shell buzzes every tap itself, unless the
+program in front says it answers touches itself (X-Haltia-Own-Feedback
+in its .desktop file, haltia-shell 2.8); then the shell keeps
+$XDG_RUNTIME_DIR/haltia/quiet-taps while it is in front, and only then
+does tapped() buzz, as long as the shell's own (touchguard's buzz_ms)
+is not 0. So a miss is not felt, and with an older shell, or none, taps
+are buzzed once, by the shell or not at all. Each is tried and forgotten: nothing here waits or fails.
 """
 import os
 import shutil
@@ -28,11 +39,17 @@ import sys
 # default theme: a short buzz for a colour, a long one for a picture.
 COLOUR_EVENT = "message-new-instant"  # 150 ms
 PICTURE_EVENT = "message-new-email"  # 750 ms
+TAP_EVENT = "bell-terminal"  # 100 ms, near the shell's 70
+# Which taps on the picture buzz (Настройки): a right one, a miss, both
+# or none.
+TAP_BUZZES = ("hit", "miss", "both", "none")
+# The shell's tap buzz: its length (0: none) in this file.
+TOUCHGUARD = "/etc/haltia/touchguard.conf"
 
 
 class Feedback:
     def __init__(self, sounds, app_id, sound=True, vibration=True, miss=True, player=None,
-                 bus=None):
+                 bus=None, quiet_taps=None, touchguard=TOUCHGUARD, taps="hit"):
         """sounds: the folder of the .oga files. player and bus
         stand in for paplay and the session bus in tests: player(argv),
         bus(app_id, event)."""
@@ -44,6 +61,11 @@ class Feedback:
         self.player = player or self._play
         self.bus = bus or self._buzz
         self._paplay = None
+        runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+        self.quiet_taps = quiet_taps or (os.path.join(runtime, "haltia", "quiet-taps")
+                                         if runtime else "")
+        self.tap_buzz = _buzz_ms(touchguard) != 0
+        self.taps = taps if taps in TAP_BUZZES else "hit"
 
     def colour_done(self):
         self._give("colour.oga", COLOUR_EVENT)
@@ -51,9 +73,22 @@ class Feedback:
     def picture_done(self):
         self._give("picture.oga", PICTURE_EVENT)
 
+    def tapped(self):
+        """A button tapped: buzzed here only while the shell leaves taps
+        to the program."""
+        if self.tap_buzz and self.quiet_taps and os.path.exists(self.quiet_taps):
+            self.bus(self.app_id, TAP_EVENT)
+
+    def hit(self):
+        """A region painted: buzzed as a tap, when taps says so."""
+        if self.taps in ("hit", "both"):
+            self.tapped()
+
     def missed(self):
         if self.miss:
             self._give("miss.oga", None)
+        if self.taps in ("miss", "both"):
+            self.tapped()
 
     def _give(self, name, event):
         if self.sound:
@@ -88,3 +123,16 @@ class Feedback:
                      None, Gio.DBusCallFlags.NO_AUTO_START, 2000, None, None)
         except Exception as exc:  # no bus at all
             sys.stderr.write("haltia-paint: feedback: %s\n" % exc)
+
+
+def _buzz_ms(path):
+    """touchguard's buzz_ms, or None when it does not say."""
+    try:
+        with open(path) as fh:
+            for line in fh:
+                key, _eq, value = line.partition("=")
+                if key.strip() == "buzz_ms":
+                    return int(value.split("#")[0].strip())
+    except (OSError, ValueError):
+        pass
+    return None
