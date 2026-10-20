@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Разделы галереи: in which sections the gallery shows the pictures.
 
 Two orders, chosen above the gallery: by theme (Природа, Животные, ...),

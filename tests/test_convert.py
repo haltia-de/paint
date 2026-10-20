@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Преобразование (haltia_paint.convert) with a stand-in for pbn.py."""
 import os
 import queue

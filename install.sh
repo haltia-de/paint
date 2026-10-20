@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 # Install haltia-paint (Раскраска): sh install.sh [ROOT] [PREFIX]
 # ROOT empty or / for this system; PREFIX /usr/local unless given (a
 # package passes /usr). It needs Python 3 with PyGObject (GTK 3) and

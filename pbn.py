@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Paint by number in regions: a picture split into numbered areas.
 
   pbn.py [--level 2|3|4|5] [--big-numbers] [--ink|--more-ink] [--set name=...] [--progress] IMAGE OUT.svgz

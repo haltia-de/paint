@@ -210,7 +210,8 @@ answers 429 when downloading many files; `make-paintings.py` retries.
 ## Conventions
 
 - Commit messages: `haltia-paint: <short sentence>.` style (`b8k-paint:` before 4.0).
-- Files carry `SPDX-License-Identifier: GPL-2.0`; LF line endings
+- Files carry `SPDX-License-Identifier: GPL-2.0-or-later` (GPL-2.0-only
+  until 4.7.3; "or later" so an Android port can use Apache-2.0 libraries); LF line endings
   (`.gitattributes`).
 - What each release brings is written in `NEWS.md`, in Russian and English
   (`## X.Y.Z (YYYY-MM-DD)`, `### Русский`, `### English`; what the person

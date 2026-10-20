@@ -5,7 +5,7 @@ pkgrel=0
 pkgdesc="Раскраска: Colour by number on paintings and prints (GTK 3)"
 url="https://github.com/haltia-de/paint"
 arch="noarch"
-license="GPL-2.0-only"
+license="GPL-2.0-or-later"
 # The name before ADR 0004: apk upgrade carries b8k-paint over to this.
 provides="b8k-paint=$pkgver-r$pkgrel"
 replaces="b8k-paint"

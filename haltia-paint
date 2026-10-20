@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Colour by number on paintings, made for an older player.
 
 A picture is split into regions, each with a number; the palette at the

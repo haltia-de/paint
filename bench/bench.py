@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Стенд генератора: the same images through pbn.py in each of its modes,
 with numbers that say how near each comes to Happy Color, and a page to
 see them side by side.

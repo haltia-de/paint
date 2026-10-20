@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Отклик: a sound and a buzz when a colour or the whole picture is done,
 a quiet sound, no buzz, for a tap on a region of another colour, and the
 short buzz of every other tap.

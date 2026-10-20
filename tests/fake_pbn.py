@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 """A stand-in for pbn.py in the tests: same command line; what it does is
 written in the source image file: "ok", "fail", or "sleep SECONDS".
 Each run appends "start OUT" and "end OUT" to the file in $FAKE_PBN_LOG."""

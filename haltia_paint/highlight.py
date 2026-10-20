@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Подсветка: how the regions of the chosen number stand out on the board.
 
 A plain colour got lost next to painted regions of a like colour (a light

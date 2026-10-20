@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Преобразование: images made into pictures by pbn.py, one at a time.
 
 The tablet has 1 GB and pbn.py takes a few hundred MB for some 15 s, so

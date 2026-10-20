@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Подсветка (haltia_paint.highlight), drawn into small surfaces (skipped
 without pycairo)."""
 import os

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-or-later
 """The program's two sounds, made here rather than taken from elsewhere:
 colour.oga, a soft low chime when a colour is done (a higher one sounded
 sharp), picture.oga, a short rising tune when a picture is done, and
