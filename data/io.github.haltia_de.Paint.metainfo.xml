@@ -19,6 +19,12 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
+    <release version="4.7.3" date="2026-10-20">
+      <description>
+        <p>The pictures in «Продолжить» always show: a picture begun sometimes had one of its two cards left pale.</p>
+        <p xml:lang="ru">Картинки в «Продолжить» всегда прорисовываются: раньше у начатой картины одна из двух карточек иногда оставалась бледной.</p>
+      </description>
+    </release>
     <release version="4.7.2" date="2026-10-20">
       <description>
         <ul>

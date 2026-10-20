@@ -1,3 +1,10 @@
+haltia-paint (4.7.3) unstable; urgency=medium
+
+  * Each gallery card keeps its own thumbnail: a picture begun no longer
+    has one of its two cards left pale.
+
+ -- Haltia <rensomail@gmail.com>  Tue, 20 Oct 2026 22:00:00 +0300
+
 haltia-paint (4.7.2) unstable; urgency=medium
 
   * «Другая папка…» no longer crashes (no emission hook on clicked);

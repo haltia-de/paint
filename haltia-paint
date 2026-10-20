@@ -2103,7 +2103,6 @@ class Paint:
         self.photo_jobs = {}  # photo path -> its job
         # Gallery thumbnails not kept yet are drawn here, one at a time.
         self.thumb_pool = Workers(1)
-        self.thumbs = {}  # picture id -> its thumbnail surface
         self.gallery = None  # kept between visits; built again when stale
         self.gallery_stale = False
         self.cards = {}  # picture id -> [(a card's box, the picture)]
@@ -2409,12 +2408,15 @@ class Paint:
         # button more), and a fixed one left the others empty below.
         thumb = Gtk.DrawingArea()
         thumb.set_size_request(320, 220)
-        self.thumbs.pop(pic["id"], None)
+        # Each card its own: a picture begun has two (Продолжить and its
+        # section), and one shared by id let the second card's making drop
+        # the first one's, left pale.
+        shown = {}
         asked = []
 
         def draw(widget, cr):
             w, h = widget.get_allocated_width(), widget.get_allocated_height()
-            image = self.thumbs.get(pic["id"])
+            image = shown.get("image")
             if image is None:
                 # Kept as PNG most of the time; else drawn in a thread
                 # while a pale square stands in.
@@ -2423,7 +2425,8 @@ class Paint:
                 cr.fill()
                 if not asked:
                     asked.append(True)
-                    self.thumb_pool.submit(self.make_thumb, pic, filled, done == total, widget)
+                    self.thumb_pool.submit(self.make_thumb, pic, filled, done == total, widget,
+                                           shown)
                 return False
             iw, ih = image.get_width(), image.get_height()
             k = min(w / iw, h / ih, 1.25)
@@ -2479,8 +2482,9 @@ class Paint:
             slot.pack_start(remove, False, False, 0)
         slot.show_all()
 
-    def make_thumb(self, pic, filled, finished, widget):
-        """In the thumbnail thread: the thumbnail, then shown."""
+    def make_thumb(self, pic, filled, finished, widget, shown):
+        """In the thumbnail thread: the thumbnail, then shown in its card
+        (shown is the card's)."""
         try:
             image = thumbnail(pic, filled, finished, self.colour_new)
         except Exception as exc:  # a broken file must not stop the thread
@@ -2488,7 +2492,7 @@ class Paint:
             return
 
         def show():
-            self.thumbs[pic["id"]] = image
+            shown["image"] = image
             widget.queue_draw()
             return False
 
