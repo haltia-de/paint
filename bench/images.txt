@@ -1,0 +1,14 @@
+# The bench's images: slug | level | Commons file name (or a path to a local
+# file for a photo, which is not fetched). Chosen to differ: flat prints,
+# brushwork, fur, sea, faces, a photo.
+sunflowers | 3 | Vincent van Gogh - Sunflowers (1888, National Gallery London).jpg
+great-wave | 4 | The Great Wave off Kanagawa.jpg
+fox | 3 | Koson - fox-in-the-reeds.jpg
+hare | 3 | Albrecht Dürer - Hare, 1502 - Google Art Project.jpg
+rye | 4 | Ivan Shishkin - Рожь - Google Art Project.jpg
+rainbow-sea | 4 | Aivazovsky, Rainbow.JPG
+cat-goldfish | 3 | Ohara koson, gatto e vasca con pesci rossi, 1933, xilografia colorata.jpg
+horse-fair | 4 | Rosa Bonheur, The Horse Fair, 1852–55.jpg
+mona-lisa | 4 | Mona Lisa, by Leonardo da Vinci, from C2RMF retouched.jpg
+girl-pearl | 3 | 1665 Girl with a Pearl Earring.jpg
+photo-flower | 3 | photo-flower.jpg

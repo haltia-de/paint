@@ -71,6 +71,12 @@ answers 429 when downloading many files; `make-paintings.py` retries.
     from `pbn.py --progress`). `tests/fake_pbn.py` stands in for pbn.py.
 - `pbn.py` — the region generator (raster to paint-by-number SVG), used by
   `make-paintings.py` as a module and by the program as a subprocess.
+- `bench/` — стенд генератора: `bench.py CACHE OUT [--fetch]` runs the
+  images of `images.txt` through pbn.py as it is (A) and experimental
+  variants (B numpy edge-aware, C OpenCV mean shift, D OpenCV SLIC) and
+  writes `OUT/index.html` with numbers and pictures side by side. Run it in
+  `docker run alpine:3.24` with py3-numpy py3-scipy py3-pillow py3-opencv
+  ttf-dejavu (the tablet's versions); OpenCV is only for the bench.
 - `make-paintings.py` — offline generator for `pictures/*.svgz`. `PAINTINGS`
   lists slug, Commons file name, Russian title, theme, level.
 - `pictures/*.svgz` — built-in pictures, gzipped SVG: one `<path>` per
