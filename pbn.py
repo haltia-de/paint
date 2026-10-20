@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0
 """Paint by number in regions: a picture split into numbered areas.
 
-  pbn.py [--level 2|3|4|5] [--big-numbers] [--ink [1|2]] [--set name=...] [--progress] IMAGE OUT.svgz
+  pbn.py [--level 2|3|4|5] [--big-numbers] [--ink|--more-ink] [--set name=...] [--progress] IMAGE OUT.svgz
 
 A painting becomes a map of regions, one colour number each, written as
 SVG: one <path> per region (fill-rule evenodd, holes are inner rings)
@@ -58,7 +58,8 @@ MIN_RADIUS, MIN_RADIUS_BIG = 2.5, 3.5
 INK = (34, 30, 28)
 # How much of the picture's darkness counts as its outlines, by --ink
 # level: a line has to lie on a ground lighter than this (Lab lightness).
-# 1 (мало): clear lines only; 2 (много): lines on darker grounds too.
+# 1 (мало, --ink): clear lines only; 2 (много, --more-ink): lines on
+# darker grounds too.
 INK_GROUND = {1: 50, 2: 40}
 
 
@@ -112,32 +113,41 @@ def shrink(img, side, crop=None):
 
 def guided(rgb, radius=3, eps=0.0025):
     """Flat where the picture varies little, its edges kept: a guided
-    filter of each channel by itself (He et al.), box filters only. The
-    brush strokes and grain that would make speckled regions go."""
+    filter of each channel by itself (He et al.), box filters only, its
+    coefficients worked out at half the size (the "fast guided filter":
+    a quarter of the work, on the tablet some 2 s less). The brush strokes
+    and grain that would make speckled regions go."""
+    h, w, _ = rgb.shape
     out = np.empty(rgb.shape, np.float32)
-    size = 2 * radius + 1
+    size = radius  # about the box of 2 radius + 1 at half the size
     for c in range(3):
         i = rgb[:, :, c].astype(np.float32) / 255
-        mean = ndimage.uniform_filter(i, size)
-        var = ndimage.uniform_filter(i * i, size) - mean * mean
+        half = i[::2, ::2]
+        mean = ndimage.uniform_filter(half, size)
+        var = ndimage.uniform_filter(half * half, size) - mean * mean
         a = var / (var + eps)
         b = mean - a * mean
-        out[:, :, c] = ndimage.uniform_filter(a, size) * i + ndimage.uniform_filter(b, size)
+        a = ndimage.uniform_filter(a, size).repeat(2, 0).repeat(2, 1)[:h, :w]
+        b = ndimage.uniform_filter(b, size).repeat(2, 0).repeat(2, 1)[:h, :w]
+        out[:, :, c] = a * i + b
     return (out.clip(0, 1) * 255 + 0.5).astype(np.uint8)
 
 
 def lightness(rgb):
-    return lab(rgb.reshape(-1, 3))[:, 0].reshape(rgb.shape[:2])
+    """CIE L* (0 to 100) of each pixel, from luminance alone."""
+    y = _LINEAR[rgb] @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    return np.where(y > 0.008856, 116 * np.cbrt(y) - 16, 903.3 * y)
 
 
-def edges(rgb):
-    """How strong an edge the picture has at each pixel, 0 to 1."""
-    light = ndimage.gaussian_filter(lightness(rgb), 1)
+def edges(light):
+    """How strong an edge the picture has at each pixel, 0 to 1, from its
+    lightness."""
+    light = ndimage.gaussian_filter(light, 1)
     g = np.hypot(ndimage.sobel(light, 0), ndimage.sobel(light, 1))
     return (g / (np.percentile(g, 99) + 1e-6)).clip(0, 1)
 
 
-def ink_lines(rgb, width=7, contrast=12, dark=45, least=20, ground=50):
+def ink_lines(light, width=7, contrast=12, dark=45, least=20, ground=50):
     """The picture's own outlines, as on a print or a drawing: lines
     darker than what is round them by contrast (Lab lightness), darker
     than dark, on a ground lighter than ground (dark textures, such as
@@ -146,8 +156,7 @@ def ink_lines(rgb, width=7, contrast=12, dark=45, least=20, ground=50):
     little lighter) count where they carry on such a line, so lines do not
     break up; whatever is broader than a line, with what is round it, is
     not one; specks under least pixels are dropped. (Before this, whole
-    dark parts of some prints went black.)"""
-    light = lightness(rgb)
+    dark parts of some prints went black.) light: lightness()."""
     closed = ndimage.grey_closing(light, size=width)
     hat = closed - light
     on_light = closed > ground
@@ -155,7 +164,7 @@ def ink_lines(rgb, width=7, contrast=12, dark=45, least=20, ground=50):
     lines = (hat > contrast / 2) & (light < dark + 15) & on_light
     lines = ndimage.binary_closing(lines | strong, np.ones((3, 3), bool))
     broad = ndimage.distance_transform_edt(lines) > width / 2
-    lines &= ~ndimage.binary_dilation(broad, iterations=width // 2 + 1)
+    lines &= ndimage.distance_transform_edt(~broad) > width // 2 + 1
     parts, n = ndimage.label(lines, np.ones((3, 3), bool))
     if not n:
         return lines
@@ -538,7 +547,8 @@ def picture(img, regions=300, colours=18, side=SIDE, detail=5, crop=None,
             progress(DONE_AFTER[name.split()[0]])
 
     rgb = shrink(img, side, crop)
-    lines = ink_lines(rgb, ground=INK_GROUND[int(ink)]) if ink else None
+    light = lightness(rgb)
+    lines = ink_lines(light, ground=INK_GROUND[int(ink)]) if ink else None
     if lines is not None:
         # The colours come from round the lines, not from the lines.
         _d, (iy, ix) = ndimage.distance_transform_edt(lines, return_indices=True)
@@ -560,7 +570,7 @@ def picture(img, regions=300, colours=18, side=SIDE, detail=5, crop=None,
     if min_area is None:
         min_area = w * h / regions / 30
     colour_lab = lab(np.array(keep, np.uint8))
-    labels, colour_of = merge(labels, colour_of, colour_lab, edges(rgb), regions,
+    labels, colour_of = merge(labels, colour_of, colour_lab, edges(light), regions,
                               min_area, min_radius, ink_colour)
     lap("merge %d" % len(colour_of))
     n = len(colour_of)
@@ -647,11 +657,13 @@ def main():
                       help='print "progress F" lines, F the share done')
     args.add_argument("--big-numbers", action="store_true",
                       help="no region too thin for a number read without zooming far in")
-    args.add_argument("--ink", type=int, nargs="?", const=1, default=0, choices=sorted(INK_GROUND),
-                      help="keep the picture's own black outlines (prints, drawings): "
-                           "1 clear lines only (the default), 2 more of them")
+    args.add_argument("--ink", action="store_true",
+                      help="keep the picture's own black outlines (prints, drawings), clear ones")
+    args.add_argument("--more-ink", action="store_true",
+                      help="as --ink, with lines on darker grounds too")
     opts = args.parse_args()
     regions, colours, detail = LEVELS[opts.level]
+    ink = 2 if opts.more_ink else 1 if opts.ink else 0
     timing = []
     start = time.monotonic()
 
@@ -660,8 +672,8 @@ def main():
 
     pic = picture(Image.open(opts.image), regions, colours, opts.side, detail, opts.crop,
                   min_radius=MIN_RADIUS_BIG if opts.big_numbers else MIN_RADIUS,
-                  ink=opts.ink, timing=timing, progress=progress if opts.progress else None)
-    meta = {"mode": mode_name(opts.big_numbers, opts.ink)}
+                  ink=ink, timing=timing, progress=progress if opts.progress else None)
+    meta = {"mode": mode_name(opts.big_numbers, ink)}
     meta.update(kv.split("=", 1) for kv in opts.set)
     write(pic, opts.out, {k: v for k, v in meta.items() if v})
     if opts.progress:

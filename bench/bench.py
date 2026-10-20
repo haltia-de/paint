@@ -9,7 +9,7 @@ see them side by side.
 CACHE holds the images that bench/images.txt lists (--fetch gets the
 missing ones from Wikimedia Commons); OUT gets index.html and pictures.
 Modes: normal; big (--big-numbers: no region too thin for a number read
-without zooming far in); ink and ink2 (big and --ink 1 or 2: the
+without zooming far in); ink and ink2 (big and --ink or --more-ink: the
 picture's own black outlines kept, few or more).
 
 What it showed (October 2026, 11 images, against pbn.py before 4.3):
@@ -120,7 +120,7 @@ def measure(res):
     border = np.zeros(labels.shape, bool)
     border[:, 1:] |= labels[:, 1:] != labels[:, :-1]
     border[1:, :] |= labels[1:, :] != labels[:-1, :]
-    strength = pbn.edges(rgb)
+    strength = pbn.edges(pbn.lightness(rgb))
     strong = strength > np.percentile(strength, 90)
     near = ndimage.binary_dilation(border, iterations=1)
     per_colour = np.bincount(colour_of[real], minlength=palette.shape[0])[used]

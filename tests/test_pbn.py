@@ -57,7 +57,7 @@ class PictureTest(unittest.TestCase):
         self.assertTrue((pic["raster"][7] >= pbn.MIN_RADIUS_BIG).all())
 
     def test_ink_keeps_lines_not_black_areas(self):
-        lines = pbn.ink_lines(np.asarray(scene(lines=True)))
+        lines = pbn.ink_lines(pbn.lightness(np.asarray(scene(lines=True))))
         self.assertTrue(lines[178:184, 20:60].any(axis=0).all())  # along the hill's edge
         self.assertFalse(lines[215:245, 255:285].any())  # inside the black square
         pic = pbn.picture(scene(lines=True), 40, 8, side=400, detail=3, ink=True)
@@ -68,9 +68,9 @@ class PictureTest(unittest.TestCase):
         self.assertNotIn("#%02x%02x%02x" % pbn.INK, pic["palette"])
 
     def test_more_ink_keeps_more(self):
-        rgb = np.asarray(scene(lines=True))
-        few = pbn.ink_lines(rgb, ground=pbn.INK_GROUND[1])
-        more = pbn.ink_lines(rgb, ground=pbn.INK_GROUND[2])
+        light = pbn.lightness(np.asarray(scene(lines=True)))
+        few = pbn.ink_lines(light, ground=pbn.INK_GROUND[1])
+        more = pbn.ink_lines(light, ground=pbn.INK_GROUND[2])
         self.assertGreaterEqual(more.sum(), few.sum())
         self.assertEqual(pbn.mode_name(True, 2), "big ink2")
         self.assertEqual(pbn.mode_name(False, 1), "ink")

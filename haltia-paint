@@ -604,7 +604,8 @@ def kind_name(kind):
 
 def kind_flags(kind):
     _level, big, ink = kind
-    return (["--big-numbers"] if big else []) + (["--ink", str(ink)] if ink else [])
+    return ((["--big-numbers"] if big else [])
+            + {0: [], 1: ["--ink"], 2: ["--more-ink"]}[ink])
 
 
 def downloaded_path(qid, kind):
@@ -2420,7 +2421,7 @@ class Paint:
         side.pack_start(grid, False, False, 0)
         # How it is made: numbers that read without zooming far in (fewer
         # regions), on or off; how much of the picture's own black
-        # outlines it keeps (pbn.py --ink 1 or 2).
+        # outlines it keeps (pbn.py --ink, --more-ink).
         self.big_button = Gtk.Button(label="Крупные номера")
         self.big_button.get_style_context().add_class("grade")
         self.big_button.connect("clicked", lambda _b: self.toggle_big())

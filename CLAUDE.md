@@ -115,7 +115,7 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   edge (`edges`), and same-coloured neighbours join every round so the
   count reached is the count aimed at (area first, thinness by distance
   transform only when sizes are right; `MIN_RADIUS`, or `MIN_RADIUS_BIG`
-  with `--big-numbers`); `--ink [1|2]`: `ink_lines` (black-hat with
+  with `--big-numbers`); `--ink` / `--more-ink` (level 1 / 2): `ink_lines` (black-hat with
   hysteresis, only dark lines on a ground lighter than `INK_GROUND[level]`,
   nothing broader than a line) become fixed regions of colour `INK` that
   take tiny cells between lines;
