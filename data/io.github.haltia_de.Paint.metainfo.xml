@@ -19,6 +19,12 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
+    <release version="4.3.0" date="2026-10-20">
+      <description>
+        <p>Pictures are made anew: their regions follow the shapes of the painting and are cleaner, the numbers stand in the middle of a region and are large enough to read without zooming far in, and prints and drawings keep their own black outlines. When adding a picture you choose «Крупные номера» and «Чёрные контуры». The built-in pictures already begun start again, as their regions are new.</p>
+        <p xml:lang="ru">Раскраски сделаны заново: области идут по формам картины и стали чище, номера стоят в середине области и крупные, их видно без сильного увеличения, а у гравюр и рисунков сохранены их чёрные контуры. При добавлении картины можно выбрать «Крупные номера» и «Чёрные контуры». Начатые встроенные картины начнутся заново, потому что области у них новые.</p>
+      </description>
+    </release>
     <release version="4.2.0" date="2026-10-20">
       <description>
         <p>Pictures are made one at a time, so the tablet no longer runs out of memory. The picture being previewed comes first and shows a bar of how far it is; leaving the preview stops its work. A photo that cannot be made says so and has an "Ещё раз" button.</p>

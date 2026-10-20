@@ -25,7 +25,7 @@ import pbn
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pictures")
 # Wikimedia asks for a User-Agent that says who is asking.
-AGENT = "haltia-paint/4.0 (https://github.com/haltia-de/paint)"
+AGENT = "haltia-paint/4.3 (https://github.com/haltia-de/paint)"
 
 # slug, source, name, theme, level, and optionally the part to use (x0,
 # y0, x1, y1 as fractions: no text, no book margins). The source is a
@@ -195,6 +195,29 @@ PAINTINGS = [
     ("summer-meadow", "openclipart:142357", "Летний луг", "Природа", 2),
     ("green-valley", "openclipart:340789", "Зелёная долина", "Природа", 2),
 ]
+# Pictures whose own black outlines are kept (pbn.py --ink): prints and
+# drawings with lines, where the outlines are the picture; chosen by
+# looking at both kinds side by side (prints painted with a brush, like
+# some of Koson's, get dark patches instead).
+INK = {
+    # Hokusai and Hiroshige (not Ono-shinden: its dark loads went black).
+    "great-wave", "fuji-gotenyama", "fuji-mishima", "fuji-noboto", "fuji-tago",
+    "fuji-mannen", "fuji-isawa", "fuji-sazai", "fuji-suwa", "fuji-senju", "fuji-katakura",
+    "fuji-enoshima", "fuji-shichiri", "fuji-kawaguchi", "fuji-totomi",
+    "plum-garden", "eagle-snow", "edo-koume", "edo-hachiman-garden", "edo-takinogawa",
+    "edo-suijin", "edo-ekoin", "edo-great-waterfall", "edo-kamata-plums", "edo-sazaido",
+    "edo-nihonbashi-street", "edo-surugacho", "edo-yabu-lane", "edo-nippori", "edo-hiroo",
+    "edo-paulownia", "edo-ryogoku", "edo-ichigaya", "edo-mama-maples", "edo-fudo-falls",
+    "edo-oji-inari", "edo-five-pines",
+    # Koson's with lines (not the fox, the crow and blossom, the tit: their
+    # brushed dark patches went black).
+    "koson-cat-goldfish", "koson-owl-moon", "koson-lilies", "koson-snow-bridge",
+    # OpenClipart drawings with black lines.
+    "autumn-barn", "autumn-forest", "butterfly", "easter-meadow", "green-village",
+    "green-valley", "summer-meadow", "sunny-grove", "lilies", "pink-flowers",
+    "flower-barrow", "forest-camp", "thatched-cottage", "stone-house", "sun-landscape",
+    "lighthouse",
+}
 # The level of a painting above, as made now: the 128-cell paintings of
 # the grid days are 600-region ones too.
 LEVEL = {2: 2, 3: 3, 4: 4, 5: 4}
@@ -242,10 +265,14 @@ def main():
             continue
         level = LEVEL[level]
         regions, colours, detail = pbn.LEVELS[level]
+        # Every built-in one with numbers to read without zooming far in.
+        ink = slug in INK
         pic = pbn.picture(Image.open(fetch(cache, name)), regions, colours, detail=detail,
-                          crop=crop[0] if crop else None)
+                          crop=crop[0] if crop else None, min_radius=pbn.MIN_RADIUS_BIG,
+                          ink=ink)
         pbn.write(pic, os.path.join(OUT, slug + ".svgz"),
-                  {"name": title, "theme": theme, "level": level, "source": name})
+                  {"mode": "big ink" if ink else "big", "name": title, "theme": theme,
+                   "level": level, "source": name})
         print(slug, len(pic["regions"]), len(pic["palette"]))
 
 

@@ -34,12 +34,15 @@ bottom has one big button per number. Pick a colour, tap its regions.
 
 Pictures are gzipped SVG made by pbn.py: one path per region, with its
 number and the point where the number goes. The gallery has paintings
-of about 120, 300 and 600 regions, and a section of Japanese prints. To
+of up to 120, 300 and 600 regions, and a section of Japanese prints. To
 stay quick on a slow tablet (no GPU: a full redraw takes a second), the
 picture is drawn in tiles at the current zoom by a thread of its own and
 kept until the zoom changes; a drag only copies tiles, a zoom stretches
 what is there until the new tiles come, a tap paints its region into the
-tiles kept. Progress is written a moment after the last tap, and gallery
+tiles kept. A picture's own outlines (pbn.py --ink) are drawn black over
+the regions and are not painted. Progress is written a moment after the
+last tap with the picture's fingerprint (data-sig), so a picture made
+again starts again rather than taking another's progress; gallery
 thumbnails are kept as PNG files.
 
 It is a GTK application, io.github.haltia_de.Paint (io.github.trudenboy.Paint
@@ -68,7 +71,10 @@ artist, title or what is painted, in Russian as well; the pictures
 themselves come from Wikimedia Commons, where every file is under a free
 licence and most paintings are in the public domain. A tap on a result
 shows it large with its artist and year, as it will look painted at the
-chosen size of regions (a tap on it shows the painting itself). pbn.py
+chosen size of regions (a tap on it shows the painting itself), with
+big numbers (no region too thin for a number read without zooming far
+in; on at first) and with its own black outlines kept (prints, drawings)
+or not, «Крупные номера» and «Чёрные контуры» turning each on and off. pbn.py
 makes it in a process of its own at low priority, as it takes 15 to 30
 seconds on the tablet, with a bar of how far it is; only one pbn.py runs
 at a time (haltia_paint.convert): the preview goes before photos, and
@@ -205,6 +211,8 @@ TOPICS = ("Шишкин", "Айвазовский", "Левитан", "Куин�
 
 # The chosen number's regions: light accent blue, the same for every colour.
 MARK = (0.66, 0.80, 0.97)
+# A picture's own outlines (pbn.py --ink), black.
+INK = (34 / 255, 30 / 255, 28 / 255)
 
 CSS = b"""
 window, .paint-bg { background-color: #e6e6e4; }
@@ -377,6 +385,7 @@ def picture_at(path, pic_id):
                 "theme": head.get("data-theme", ""), "level": int(head.get("data-level", 9)),
                 "w": float(head["width"]), "h": float(head["height"]),
                 "palette": head["data-palette"].split(), "count": int(head["data-count"]),
+                "sig": head.get("data-sig"), "mode": head.get("data-mode", "").split(),
                 "mtime": st.st_mtime}
     except (OSError, ET.ParseError, StopIteration, KeyError, ValueError):
         return None
@@ -391,16 +400,14 @@ class Region:
 
 def regions_of(pic):
     """The regions, read only when a picture is drawn, and a grid of the
-    regions whose box meets each GRID-unit square."""
+    regions whose box meets each GRID-unit square; the picture's own
+    outlines (pbn.py --ink), if it has them, in pic["ink"]."""
     if "regions" not in pic:
         with gzip.open(pic["path"]) as fh:
             root = ET.fromstring(fh.read())
         cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_A8, 1, 1))
-        regions, grid = [], {}
+        regions, grid, ink = [], {}, []
         for el in root.iter(SVG + "path"):
-            reg = Region()
-            reg.n = int(el.get("data-n")) - 1
-            reg.x, reg.y, reg.r = map(float, el.get("data-label").split())
             cr.new_path()
             for ring in el.get("d").split("M")[1:]:
                 v = [float(t) for t in ring.rstrip("Z").split()]
@@ -408,14 +415,37 @@ def regions_of(pic):
                 for i in range(2, len(v), 2):
                     cr.line_to(v[i], v[i + 1])
                 cr.close_path()
+            if el.get("data-ink"):
+                ink.append(cr.copy_path())
+                continue
+            reg = Region()
+            reg.n = int(el.get("data-n")) - 1
+            reg.x, reg.y, reg.r = map(float, el.get("data-label").split())
             reg.path = cr.copy_path()
             reg.box = x0, y0, x1, y1 = cr.path_extents()
             for gx in range(int(x0 // GRID), int(x1 // GRID) + 1):
                 for gy in range(int(y0 // GRID), int(y1 // GRID) + 1):
                     grid.setdefault((gx, gy), []).append(len(regions))
             regions.append(reg)
-        pic["regions"], pic["grid"] = regions, grid
+        if ink:
+            # All the outlines as one path, filled at once.
+            cr.new_path()
+            for part in ink:
+                cr.append_path(part)
+            ink = cr.copy_path()
+        pic["regions"], pic["grid"], pic["ink"] = regions, grid, ink or None
     return pic["regions"]
+
+
+def without_regions(pic):
+    """The picture's description without what regions_of read."""
+    return {k: v for k, v in pic.items() if k not in ("regions", "grid", "ink")}
+
+
+def drop_regions(pic):
+    """Forget what regions_of read (it is read again when needed)."""
+    for key in ("regions", "grid", "ink"):
+        pic.pop(key, None)
 
 
 def regions_in(pic, x0, y0, x1, y1):
@@ -564,8 +594,29 @@ def pixbuf_of(data, width, height):
                            max(1, int(pb.get_height() * scale)), GdkPixbuf.InterpType.BILINEAR)
 
 
-def downloaded_path(qid, level):
-    return os.path.join(DOWNLOADED, "%s-%d.svgz" % (qid, level))
+def kind_name(kind):
+    """A preview's kind of picture, (level, big numbers, outlines), as it
+    ends a file or id: "3", "3b", "4bk" (pictures before 4.3 have only
+    the level)."""
+    level, big, ink = kind
+    return "%d%s%s" % (level, "b" if big else "", "k" if ink else "")
+
+
+def kind_flags(kind):
+    _level, big, ink = kind
+    return (["--big-numbers"] if big else []) + (["--ink"] if ink else [])
+
+
+def downloaded_path(qid, kind):
+    return os.path.join(DOWNLOADED, "%s-%s.svgz" % (qid, kind_name(kind)))
+
+
+def downloaded_any(qid):
+    """Whether any kind of this painting is in the gallery."""
+    try:
+        return any(f.startswith(qid + "-") for f in os.listdir(DOWNLOADED))
+    except OSError:
+        return False
 
 
 def photo_path(path):
@@ -664,8 +715,9 @@ def load_progress(pic):
     try:
         with open(progress_path(pic)) as fh:
             data = json.load(fh)
-        # A picture made again (or one of the old grid ones) starts again.
-        if data["count"] == pic["count"]:
+        # A picture made again (or one of the old grid ones) starts again:
+        # its regions' fingerprint (data-sig) or their count differs.
+        if data["count"] == pic["count"] and data.get("sig") == pic.get("sig"):
             return {i for i in data["filled"] if 0 <= i < pic["count"]}
     except (OSError, ValueError, KeyError, TypeError):
         pass
@@ -677,7 +729,7 @@ def save_progress(pic, filled):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".new"
     with open(tmp, "w") as fh:
-        json.dump({"count": pic["count"], "filled": sorted(filled)}, fh)
+        json.dump({"count": pic["count"], "sig": pic.get("sig"), "filled": sorted(filled)}, fh)
     os.replace(tmp, path)
 
 
@@ -739,6 +791,22 @@ def draw_regions(cr, pic, scale, regions, fill, outline=None, number=None):
             if outline(i):
                 cr.append_path(regs[i].path)
         cr.stroke()
+    # The picture's own black outlines, over the regions drawn (only
+    # within their boxes when they are a few).
+    if fill and pic.get("ink") is not None:
+        cr.save()
+        if len(regions) < 50:
+            # Boxes may overlap: their union, not even-odd.
+            cr.set_fill_rule(cairo.FILL_RULE_WINDING)
+            for i in regions:
+                x0, y0, x1, y1 = regs[i].box
+                cr.rectangle(x0 - 1, y0 - 1, x1 - x0 + 2, y1 - y0 + 2)
+            cr.clip()
+            cr.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+        cr.append_path(pic["ink"])
+        cr.set_source_rgb(*INK)
+        cr.fill()
+        cr.restore()
     cr.restore()
     if not number:
         return
@@ -796,7 +864,7 @@ def thumbnail(pic, filled, finished):
                           [regs[i].n])
     if not loaded:
         # Not needed again until the picture is opened.
-        del pic["regions"], pic["grid"]
+        drop_regions(pic)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         image.write_to_png(path + ".new")
@@ -1710,6 +1778,8 @@ class Paint:
         self.search_page = None
         self.search_gen = 0
         self.preview_item = None
+        # The kind of picture a preview makes, kept from one to the next.
+        self.big_numbers, self.ink = True, False
         self.pool = Workers(3)
         # pbn.py, one at a time: previews first, then photos (Преобразование).
         self.conversion = Conversion(PBN, notify=GLib.idle_add)
@@ -1867,7 +1937,7 @@ class Paint:
             return
         name = os.path.splitext(os.path.basename(path))[0]
         self.photo_jobs[path] = self.conversion.submit(
-            path, out, 3, {"name": name, "level": 9},
+            path, out, 3, {"name": name, "level": 9}, flags=["--big-numbers"],
             on_done=lambda _job, ok: self.photo_ready(path, ok))
 
     def photo_ready(self, path, ok):
@@ -2262,7 +2332,7 @@ class Paint:
         name.set_max_width_chars(18)
         inner.pack_start(name, False, False, 0)
         who = ", ".join(x for x in (item["author"], str(item["year"] or "")) if x)
-        if any(os.path.exists(downloaded_path(item["qid"], g[0])) for g in GRADES):
+        if downloaded_any(item["qid"]):
             who = "✓ уже в раскрасках"
         info = Gtk.Label(label=who)
         info.set_ellipsize(Pango.EllipsizeMode.END)
@@ -2348,6 +2418,16 @@ class Paint:
             grid.attach(b, n % 2, n // 2, 1, 1)
             self.grade_buttons.append((b, grade))
         side.pack_start(grid, False, False, 0)
+        # How it is made, each on or off: numbers that read without
+        # zooming far in (fewer regions), the picture's own black outlines.
+        kinds = Gtk.Box(spacing=10, homogeneous=True)
+        self.big_button = Gtk.Button(label="Крупные номера")
+        self.ink_button = Gtk.Button(label="Чёрные контуры")
+        for b, name in ((self.big_button, "big"), (self.ink_button, "ink")):
+            b.get_style_context().add_class("grade")
+            b.connect("clicked", lambda _b, k=name: self.toggle_kind(k))
+            kinds.pack_start(b, True, True, 0)
+        side.pack_start(kinds, False, False, 0)
         self.preview_note = Gtk.Label(xalign=0)
         self.preview_note.set_line_wrap(True)
         self.preview_note.get_style_context().add_class("note")
@@ -2388,29 +2468,40 @@ class Paint:
             self.choose_grade(self.grade)
         return False
 
+    def kind(self):
+        """What the preview is to show: (level, big numbers, outlines)."""
+        return (self.grade[0], self.big_numbers, self.ink)
+
+    def toggle_kind(self, name):
+        if name == "big":
+            self.big_numbers = not self.big_numbers
+        else:
+            self.ink = not self.ink
+        self.choose_grade(self.grade)
+
     def convert_grades(self, item):
-        """Make the picture of the chosen size of regions, before any other
-        work (the person waits for it); each size shows as it is ready."""
-        level = self.grade[0]
+        """Make the picture of the chosen kind, before any other work (the
+        person waits for it); each kind shows as it is ready."""
+        kind = self.kind()
         jobs = item.setdefault("jobs", {})
-        if level in item["pics"] or level in jobs:
+        if kind in item["pics"] or kind in jobs:
             return
-        out = os.path.join(WORK, "%s-%d.svgz" % (item["qid"], level))
+        out = os.path.join(WORK, "%s-%s.svgz" % (item["qid"], kind_name(kind)))
         meta = {"name": item["title"], "theme": item["author"], "level": 8,
                 "source": item["file"], "wikidata": item["qid"]}
-        item.setdefault("progress", {})[level] = 0
-        jobs[level] = self.conversion.submit(
-            item["data"], out, level, meta, urgent=True,
-            on_progress=lambda _job, share: self.grade_progress(item, level, share),
-            on_done=lambda _job, ok: self.grade_made(item, level, out, ok))
+        item.setdefault("progress", {})[kind] = 0
+        jobs[kind] = self.conversion.submit(
+            item["data"], out, kind[0], meta, urgent=True, flags=kind_flags(kind),
+            on_progress=lambda _job, share: self.grade_progress(item, kind, share),
+            on_done=lambda _job, ok: self.grade_made(item, kind, out, ok))
 
-    def grade_progress(self, item, level, share):
-        item["progress"][level] = share
-        if item is self.preview_item and level == self.grade[0]:
+    def grade_progress(self, item, kind, share):
+        item["progress"][kind] = share
+        if item is self.preview_item and kind == self.kind():
             self.view_progress.set_fraction(share)
 
-    def grade_made(self, item, level, out, ok):
-        """A size made: drawn small in a thread, then shown; None in
+    def grade_made(self, item, kind, out, ok):
+        """A kind made: drawn small in a thread, then shown; None in
         item["pics"] when it could not be made."""
         def work():
             pic = picture_at(out, "preview") if ok else None
@@ -2418,13 +2509,13 @@ class Paint:
                 pic["image"] = whole_picture(
                     pic, 640, 520, lambda i, p=pic: hex_rgb(p["palette"][p["regions"][i].n]),
                     lambda i: True)
-                del pic["regions"], pic["grid"]
+                drop_regions(pic)
             GLib.idle_add(made, pic)
 
         def made(pic):
-            item["jobs"].pop(level, None)
-            item["pics"][level] = pic
-            if item is self.preview_item and level == self.grade[0]:
+            item["jobs"].pop(kind, None)
+            item["pics"][kind] = pic
+            if item is self.preview_item and kind == self.kind():
                 self.choose_grade(self.grade)
             return False
 
@@ -2440,14 +2531,15 @@ class Paint:
 
     def pick_grade(self, grade):
         """A size tapped: one that could not be made is tried again."""
-        if self.preview_item["pics"].get(grade[0], ()) is None:
-            del self.preview_item["pics"][grade[0]]
+        kind = (grade[0], self.big_numbers, self.ink)
+        if self.preview_item["pics"].get(kind, ()) is None:
+            del self.preview_item["pics"][kind]
         self.choose_grade(grade)
 
     def draw_preview(self, widget, cr):
         item = self.preview_item
         w, h = widget.get_allocated_width(), widget.get_allocated_height()
-        pic = item["pics"].get(self.grade[0]) if item else None
+        pic = item["pics"].get(self.kind()) if item else None
         if pic and not self.show_original:
             image = pic["image"]
             cr.set_source_surface(image, (w - image.get_width()) // 2,
@@ -2464,7 +2556,7 @@ class Paint:
         return False
 
     def flip_preview(self):
-        if self.preview_item and self.grade[0] in self.preview_item["pics"]:
+        if self.preview_item and self.kind() in self.preview_item["pics"]:
             self.show_original = not self.show_original
             self.choose_grade(self.grade)
         return False
@@ -2472,15 +2564,16 @@ class Paint:
     def choose_grade(self, grade):
         self.grade = grade
         item = self.preview_item
-        for b, g in self.grade_buttons:
-            (b.get_style_context().add_class if g == grade
-             else b.get_style_context().remove_class)("on")
-        if grade[0] not in item["pics"]:
+        for b, on in ([(b, g == grade) for b, g in self.grade_buttons]
+                      + [(self.big_button, self.big_numbers), (self.ink_button, self.ink)]):
+            (b.get_style_context().add_class if on else b.get_style_context().remove_class)("on")
+        kind = self.kind()
+        if kind not in item["pics"]:
             self.show_original = False
             if "data" in item:
                 self.convert_grades(item)
-        pic = item["pics"].get(grade[0])
-        have = os.path.exists(downloaded_path(item["qid"], grade[0]))
+        pic = item["pics"].get(kind)
+        have = os.path.exists(downloaded_path(item["qid"], kind))
         if item.get("licence"):
             free = item["licence"].lower() in ("public domain", "cc0", "pd")
             self.licence_label.set_text("Общественное достояние" if free
@@ -2489,7 +2582,7 @@ class Paint:
             self.view_note.set_text("Не удалось загрузить картину")
         elif "data" not in item:
             self.view_note.set_text("Загружаю картину…")
-        elif grade[0] not in item["pics"]:
+        elif kind not in item["pics"]:
             self.view_note.set_text("Готовлю раскраску, это около полуминуты…")
         elif pic is None:
             self.view_note.set_text("Не получилось сделать раскраску. "
@@ -2505,21 +2598,21 @@ class Paint:
                                        % (pic["count"], len(pic["palette"])))
         else:
             self.preview_note.set_text("")
-        making = "data" in item and grade[0] not in item["pics"]
-        self.view_progress.set_fraction(item.get("progress", {}).get(grade[0], 0))
+        making = "data" in item and kind not in item["pics"]
+        self.view_progress.set_fraction(item.get("progress", {}).get(kind, 0))
         self.view_progress.set_visible(making)
         self.get_button.set_label("Раскрашивать" if have else "Загрузить")
         self.get_button.set_sensitive(bool(have or pic))
         self.view.queue_draw()
 
     def get_picture(self):
-        item, level = self.preview_item, self.grade[0]
-        pic_id = "wd-%s-%d" % (item["qid"], level)
-        path = downloaded_path(item["qid"], level)
+        item, kind = self.preview_item, self.kind()
+        pic_id = "wd-%s-%s" % (item["qid"], kind_name(kind))
+        path = downloaded_path(item["qid"], kind)
         if not os.path.exists(path):
             try:
                 os.makedirs(DOWNLOADED, exist_ok=True)
-                shutil.copyfile(item["pics"][level]["path"], path + ".new")
+                shutil.copyfile(item["pics"][kind]["path"], path + ".new")
                 os.replace(path + ".new", path)
             except OSError as exc:
                 sys.stderr.write("haltia-paint: %s: %s\n" % (path, exc))
@@ -2549,7 +2642,7 @@ class Paint:
             self.board.stop()
         # A copy: the gallery's thread may read and drop this picture's
         # regions for a thumbnail meanwhile.
-        pic = {k: v for k, v in pic.items() if k not in ("regions", "grid")}
+        pic = without_regions(pic)
         self.board = Board(self, pic)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         middle = Gtk.Box()
@@ -2770,7 +2863,7 @@ class Paint:
                 while os.path.exists(path):
                     path = os.path.join(folder, "%s %d.png" % (name, n))
                     n += 1
-                own = {k: v for k, v in pic.items() if k not in ("regions", "grid")}
+                own = without_regions(pic)
                 full = [hex_rgb(c) for c in own["palette"]]
                 regs = regions_of(own)
                 image = whole_picture(own, 2000, 2000, lambda i: full[regs[i].n])

@@ -71,7 +71,7 @@ class ConversionTest(unittest.TestCase):
     def test_failure_leaves_nothing(self):
         self.submit("a", "fail")
         self.assertEqual(self.done(1), {"a": False})
-        self.assertEqual(sorted(os.listdir(self.dir)), ["a.src", "log"])
+        self.assertEqual(sorted(os.listdir(self.dir)), ["a.args", "a.src", "log"])
 
     def test_cancel_waiting(self):
         self.submit("a", "sleep 0.5")
@@ -114,6 +114,14 @@ class ConversionTest(unittest.TestCase):
         self.done(3)
         self.assertEqual([r for r in self.runs() if r.startswith("start")],
                          ["start a", "start c", "start b"])
+
+    def test_flags_reach_pbn(self):
+        self.conversion.submit(self.source("a", "ok"), os.path.join(self.dir, "a"), 3,
+                               flags=["--big-numbers", "--ink"],
+                               on_done=lambda job, ok: self.events.put(("done", "a", ok)))
+        self.assertEqual(self.done(1), {"a": True})
+        with open(os.path.join(self.dir, "a.args")) as fh:
+            self.assertEqual(fh.read().split()[-2:], ["--big-numbers", "--ink"])
 
     def test_bytes_are_written_and_removed(self):
         self.conversion.submit(b"ok", os.path.join(self.dir, "a"), 3,

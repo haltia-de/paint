@@ -72,18 +72,24 @@ answers 429 when downloading many files; `make-paintings.py` retries.
 - `pbn.py` — the region generator (raster to paint-by-number SVG), used by
   `make-paintings.py` as a module and by the program as a subprocess.
 - `bench/` — стенд генератора: `bench.py CACHE OUT [--fetch]` runs the
-  images of `images.txt` through pbn.py as it is (A) and experimental
-  variants (B numpy edge-aware, C OpenCV mean shift, D OpenCV SLIC) and
-  writes `OUT/index.html` with numbers and pictures side by side. Run it in
-  `docker run alpine:3.24` with py3-numpy py3-scipy py3-pillow py3-opencv
-  ttf-dejavu (the tablet's versions); OpenCV is only for the bench.
+  images of `images.txt` through pbn.py's modes (normal, big numbers,
+  big + ink) and writes `OUT/index.html` with numbers (regions, contours
+  followed, likeness, number sizes, time) and pictures side by side; its
+  docstring keeps what the comparisons showed (OpenCV was tried and left
+  out). Run it in `docker run alpine:3.24` with py3-numpy py3-scipy
+  py3-pillow ttf-dejavu (the tablet's versions). Change pbn.py with it:
+  a step is better when the numbers say so on all the images.
 - `make-paintings.py` — offline generator for `pictures/*.svgz`. `PAINTINGS`
-  lists slug, Commons file name, Russian title, theme, level.
+  lists slug, Commons file name, Russian title, theme, level; all are made
+  with big numbers, those in `INK` with their own black outlines.
 - `pictures/*.svgz` — built-in pictures, gzipped SVG: one `<path>` per
   region (`fill-rule` evenodd, holes as inner rings, `M x y x y ...Z`) with
   `data-n` (colour number from 1, light to dark) and `data-label` "x y r"
-  (where the number goes, inradius); root carries `data-palette`,
-  `data-count`, `data-name`, `data-theme`, `data-level`, `data-source`.
+  (where the number goes, inradius); at most one `<path data-ink="1">`
+  after them, the picture's own outlines (`--ink`), drawn black on top,
+  not a region; root carries `data-palette`, `data-count` (regions, ink
+  not counted), `data-sig` (fingerprint of the regions), `data-mode`
+  ("big", "ink"), `data-name`, `data-theme`, `data-level`, `data-source`.
 - `data/` — `.desktop`, hicolor SVG icon, AppStream metainfo.
 - Packages: `packaging/alpine/APKBUILD`; `debian/` (deps from noble and
   trixie plus our `python3-haltia-kit`; the pre-4.0 names are left out);
@@ -101,12 +107,20 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   colours (`LEVELS` in `pbn.py`, `GRADES` in `haltia-paint` must agree);
   built-ins use 3 and 4, 5 only for downloads; 8 = downloaded from
   Wikidata; 9 = user photos.
-- **Generator** (`pbn.py`, after drake7707/paintbynumbersgenerator): Lab
-  k-means colours, mode filter, connected components, merging small/thin
-  regions into the neighbour with the longest shared border (area first,
-  thinness by distance transform only when sizes are right), then borders
-  traced once per region pair on pixel corners so neighbours share them
-  exactly, smoothed and simplified. Coordinates: 1000 units on the long side.
+- **Generator** (`pbn.py`, after drake7707/paintbynumbersgenerator):
+  `shrink`, a guided filter (edges kept, brushwork flattened), Lab k-means
+  colours, mode filter, connected components, `merge`: small/thin regions
+  go to the neighbour scored by shared border × colour likeness × weak
+  edge (`edges`), and same-coloured neighbours join every round so the
+  count reached is the count aimed at (area first, thinness by distance
+  transform only when sizes are right; `MIN_RADIUS`, or `MIN_RADIUS_BIG`
+  with `--big-numbers`); `--ink`: `ink_lines` (black-hat with hysteresis)
+  become fixed regions of colour `INK` that take tiny cells between lines;
+  numbers in the middle of each region's widest part (`label_points`);
+  then borders traced once per region pair on pixel corners so neighbours
+  share them exactly, smoothed and simplified. Coordinates: 1000 units on
+  the long side. `picture(..., raster=True)` also returns the pixels (the
+  seam the bench and `tests/test_pbn.py` use).
 - **Rendering** (`Board`): the board pans and zooms itself (a
   ScrolledWindow cost a third of the frames); it is drawn in `TILE` px
   tiles, in a thread of its own, cached until the zoom changes. A tap
@@ -116,9 +130,15 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   boxes, then `cairo.in_fill`; a miss falls back to the nearest unpainted
   region of the chosen colour within `FINGER` px via `in_stroke`.
 - **Picture ids** prefix the source: `builtin-<slug>`, `photo-<hash>`,
-  `wd-<QID>-<level>`. Progress lives in
-  `~/.local/share/haltia-paint/progress/<id>.json` as `{"count", "filled": [region
-  indexes]}`; a count mismatch resets it. `last` stores the last opened id.
+  `wd-<QID>-<kind>` (kind: level, then `b` for big numbers, `k` for ink,
+  e.g. `3bk`; before 4.3 only the level). Progress lives in
+  `~/.local/share/haltia-paint/progress/<id>.json` as `{"count", "sig",
+  "filled": [region indexes]}`; a count or `sig` mismatch resets it (a
+  picture made again). `last` stores the last opened id.
+- **Preview kinds**: a grade plus «Крупные номера» and «Чёрные контуры»
+  toggles (`Paint.kind()`, kept between previews; big numbers on by
+  default); each kind is its own urgent conversion. Photos of Раскраски
+  are made with big numbers.
 - **Photos and downloads** are converted through `Conversion`
   (`haltia_paint/convert.py`): `pbn.py` in a niced subprocess, one at a
   time (1 GB of RAM); a preview is urgent and stops a photo, which starts

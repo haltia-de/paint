@@ -2,22 +2,31 @@
 # SPDX-License-Identifier: GPL-2.0
 """Paint by number in regions: a picture split into numbered areas.
 
-  pbn.py [--level 3|4|5] [--set name=...] [--progress] IMAGE OUT.svgz
+  pbn.py [--level 2|3|4|5] [--big-numbers] [--ink] [--set name=...] [--progress] IMAGE OUT.svgz
 
 A painting becomes a map of regions, one colour number each, written as
 SVG: one <path> per region (fill-rule evenodd, holes are inner rings)
 with data-n, its colour number counted from 1, light to dark, and
-data-label "x y r", the point furthest from its edge and that distance,
-where its number goes. The root carries data-palette, data-count (of
-regions) and, from --set,
-what haltia-paint shows: data-name, data-theme, data-level.
+data-label "x y r", where its number goes (the middle of its widest
+part) and how far that is from its edge. With --ink the picture's own
+black outlines (a print's or a drawing's lines) are kept as paths with
+data-ink, drawn on top, not painted. The root carries data-palette,
+data-count (of regions), data-sig (a fingerprint of the regions, so
+progress is not carried over to a picture made differently), data-mode
+("big", "ink") and, from --set, what haltia-paint shows: data-name,
+data-theme, data-level.
 
-The steps follow drake7707/paintbynumbersgenerator (MIT):
-- brighten the old varnish, shrink, smooth, reduce to a few colours
-  (k-means in Lab, where distance is close to how different they look);
+The steps follow drake7707/paintbynumbersgenerator (MIT), with what the
+bench (bench/) showed brings it nearer Happy Color:
+- brighten the old varnish, shrink, smooth keeping the edges (a guided
+  filter, so brushwork does not make speckled regions), reduce to a few
+  colours (k-means in Lab, where distance is close to how different they
+  look);
 - connected areas of one colour are regions; regions too small to tap
-  or too thin for a number go to the neighbour they share the longest
-  border with, until at most so many are left as the level allows;
+  or too thin for a number (--big-numbers: thin for one read without
+  zooming far in) go to the neighbour with a long shared border, a
+  colour alike and a weak edge between, until at most so many are left
+  as the level allows; neighbours of one colour join in every round;
 - borders are traced once between each pair of regions, on the corners
   of the pixels, so neighbours share them exactly; then smoothed and
   simplified, so that two regions never leave a gap between them.
@@ -26,6 +35,7 @@ picture takes some 15 s, a 600-region one some 20 s.
 """
 import argparse
 import gzip
+import hashlib
 import os
 import time
 from xml.sax.saxutils import quoteattr
@@ -40,6 +50,12 @@ SIDE = 1000
 # Levels: at most so many regions, of at most so many colours; speckles
 # below the detail size (pixels) join what surrounds them.
 LEVELS = {2: (120, 14, 5), 3: (300, 18, 5), 4: (600, 24, 3), 5: (1000, 28, 3)}
+# The thinnest a region may be (picture units): its number has to fit.
+# With big numbers it can be read without zooming far in, for fewer
+# regions (about a quarter fewer).
+MIN_RADIUS, MIN_RADIUS_BIG = 2.5, 3.5
+# The colour of a picture's own outlines (--ink).
+INK = (34, 30, 28)
 
 
 # sRGB 0..255 to linear light, as a table: the power for each pixel is
@@ -60,16 +76,19 @@ def lab(rgb):
                      200 * (f[:, 1] - f[:, 2])), -1)
 
 
-def reduce(img, side, colours, detail=5, crop=None):
-    """The picture (cut to crop, fractions x0 y0 x1 y1, if given) shrunk
-    to side along its long edge and reduced to at most colours: (index
-    array, palette as a list of (r, g, b)). Speckles smaller than detail
-    pixels join what surrounds them."""
+def shrink(img, side, crop=None):
+    """The picture (cut to crop, fractions x0 y0 x1 y1, if given) without
+    its even margin, a little brighter, shrunk to side along its long
+    edge: an (h, w, 3) byte array."""
     img = ImageOps.exif_transpose(img).convert("RGB")
     if crop:
         w, h = img.size
         img = img.crop((round(crop[0] * w), round(crop[1] * h),
                         round(crop[2] * w), round(crop[3] * h)))
+    # Large photos: decoded smaller to begin with (JPEG draft), then cut
+    # down before the slower steps.
+    if max(img.size) > 3 * side:
+        img.thumbnail((3 * side, 3 * side), Image.BILINEAR)
     # An even margin (the paper round a drawing) is not part of it.
     corner = Image.new("RGB", img.size, img.getpixel((0, 0)))
     box = ImageChops.difference(img, corner).convert("L").point(lambda v: v > 24 and 255).getbbox()
@@ -84,9 +103,65 @@ def reduce(img, side, colours, detail=5, crop=None):
         size = side, max(8, round(side * h / w))
     else:
         size = max(8, round(side * w / h)), side
-    small = img.resize(size, Image.LANCZOS).filter(ImageFilter.MedianFilter(3))
-    rgb = np.asarray(small).reshape(-1, 3)
-    pixels = lab(rgb)
+    return np.asarray(img.resize(size, Image.LANCZOS).filter(ImageFilter.MedianFilter(3)))
+
+
+def guided(rgb, radius=3, eps=0.0025):
+    """Flat where the picture varies little, its edges kept: a guided
+    filter of each channel by itself (He et al.), box filters only. The
+    brush strokes and grain that would make speckled regions go."""
+    out = np.empty(rgb.shape, np.float32)
+    size = 2 * radius + 1
+    for c in range(3):
+        i = rgb[:, :, c].astype(np.float32) / 255
+        mean = ndimage.uniform_filter(i, size)
+        var = ndimage.uniform_filter(i * i, size) - mean * mean
+        a = var / (var + eps)
+        b = mean - a * mean
+        out[:, :, c] = ndimage.uniform_filter(a, size) * i + ndimage.uniform_filter(b, size)
+    return (out.clip(0, 1) * 255 + 0.5).astype(np.uint8)
+
+
+def lightness(rgb):
+    return lab(rgb.reshape(-1, 3))[:, 0].reshape(rgb.shape[:2])
+
+
+def edges(rgb):
+    """How strong an edge the picture has at each pixel, 0 to 1."""
+    light = ndimage.gaussian_filter(lightness(rgb), 1)
+    g = np.hypot(ndimage.sobel(light, 0), ndimage.sobel(light, 1))
+    return (g / (np.percentile(g, 99) + 1e-6)).clip(0, 1)
+
+
+def ink_lines(rgb, width=7, contrast=12, dark=45, least=20):
+    """The picture's own outlines, as on a print or a drawing: lines
+    darker than what is round them by contrast (Lab lightness), darker
+    than dark and thinner than width pixels (a black-hat), so broad dark
+    areas are not lines. Fainter stretches (half the contrast, a little
+    lighter) count where they carry on such a line, so lines do not break
+    up; specks under least pixels are dropped."""
+    light = lightness(rgb)
+    hat = ndimage.grey_closing(light, size=width) - light
+    strong = (hat > contrast) & (light < dark)
+    weak = (hat > contrast / 2) & (light < dark + 15)
+    weak = ndimage.binary_closing(weak | strong, np.ones((3, 3), bool))
+    parts, n = ndimage.label(weak, np.ones((3, 3), bool))
+    if not n:
+        return strong
+    has_strong = np.bincount(parts[strong], minlength=n + 1) > 0
+    size = np.bincount(parts.ravel(), minlength=n + 1)
+    keep = has_strong & (size >= least)
+    keep[0] = False
+    return keep[parts]
+
+
+def reduce(rgb, colours, detail=5):
+    """The small picture reduced to at most colours: (index array,
+    palette as a list of (r, g, b)). Speckles smaller than detail pixels
+    join what surrounds them."""
+    h, w, _ = rgb.shape
+    flat = rgb.reshape(-1, 3)
+    pixels = lab(flat)
     # k-means in Lab on a sample, a few more centres than wanted.
     rng = np.random.default_rng(1)
     sample = pixels[rng.choice(len(pixels), min(len(pixels), 20000), replace=False)]
@@ -107,16 +182,19 @@ def reduce(img, side, colours, detail=5, crop=None):
             to[i] = len(keep)
             keep.append(i)
     idx = to[idx]
-    img_idx = Image.fromarray(idx.reshape(size[1], size[0]).astype(np.uint8), "L")
+    img_idx = Image.fromarray(idx.reshape(h, w).astype(np.uint8), "L")
     if detail > 1:
         img_idx = img_idx.filter(ImageFilter.ModeFilter(detail))
-    idx = np.asarray(img_idx).astype(np.int32)
-    # Each colour is the average of the pixels it stands for.
+    return np.asarray(img_idx).astype(np.int32), len(keep)
+
+
+def mean_colours(idx, rgb, n):
+    """Each colour as the average of the pixels it stands for."""
     flat = idx.ravel()
-    n = len(keep)
     total = np.bincount(flat, minlength=n).clip(1)
-    mean = np.stack([np.bincount(flat, rgb[:, k].astype(float), n) / total for k in range(3)], 1)
-    return idx, [tuple(int(round(v)) for v in c) for c in mean]
+    mean = np.stack([np.bincount(flat, rgb.reshape(-1, 3)[:, k].astype(float), n) / total
+                     for k in range(3)], 1)
+    return [tuple(int(round(v)) for v in c) for c in mean]
 
 
 def components(idx, colours):
@@ -145,25 +223,49 @@ def inner_distance(labels):
     return ndimage.distance_transform_edt(~edge)
 
 
-def best_neighbours(labels, n, small):
-    """For each small region the neighbour it shares the longest border
-    with, -1 for none."""
+def border_pairs(labels, strength):
+    """Every pair of 4-neighbour pixels in different regions: (a, b, the
+    edge strength there)."""
     a = np.concatenate((labels[:, :-1].ravel(), labels[:-1, :].ravel()))
     b = np.concatenate((labels[:, 1:].ravel(), labels[1:, :].ravel()))
+    g = np.concatenate((np.maximum(strength[:, :-1], strength[:, 1:]).ravel(),
+                        np.maximum(strength[:-1, :], strength[1:, :]).ravel()))
     diff = a != b
-    a, b = a[diff], b[diff]
-    src, dst = np.concatenate((a, b)), np.concatenate((b, a))
+    return a[diff], b[diff], g[diff]
+
+
+def best_neighbours(a, b, g, n, small, colour_lab, is_ink):
+    """For each small region the neighbour to join, -1 for none: a long
+    shared border, a colour alike, a weak edge between them (so a detail
+    of its own colour is not swallowed by whatever is largest round it).
+    An outline takes a region only when nothing else is near."""
+    src, dst, g = np.concatenate((a, b)), np.concatenate((b, a)), np.concatenate((g, g))
     want = small[src]
-    keys, counts = np.unique(src[want].astype(np.int64) * n + dst[want], return_counts=True)
+    keys, inv, counts = np.unique(src[want].astype(np.int64) * n + dst[want],
+                                  return_inverse=True, return_counts=True)
     src, dst = keys // n, keys % n
-    # Per source the longest border: sort by source, then count descending.
-    order = np.lexsort((-counts, src))
+    edge = np.bincount(inv, g[want], len(keys)) / counts
+    alike = np.exp(-np.linalg.norm(colour_lab[src] - colour_lab[dst], axis=1) / 12)
+    score = counts * alike * (1 - 0.8 * edge)
+    score[is_ink[dst]] *= 0.02
+    # Per source the best: sort by source, then score descending.
+    order = np.lexsort((-score, src))
     src, dst = src[order], dst[order]
     first = np.ones(len(src), bool)
     first[1:] = src[1:] != src[:-1]
     best = np.full(n, -1, np.int64)
     best[src[first]] = dst[first]
     return best
+
+
+def roots(parent):
+    """Pointer jumping until each points at the end of its chain."""
+    for _ in range(64):
+        nxt = parent[parent]
+        if (nxt == parent).all():
+            break
+        parent = nxt
+    return parent
 
 
 def radii(labels, dist, n):
@@ -173,45 +275,90 @@ def radii(labels, dist, n):
     return out
 
 
-def merge(labels, colour_of, regions, min_area, min_radius):
+def merge(labels, colour_of, colour_lab, strength, regions, min_area, min_radius, ink=None):
     """Give small and thin regions to their neighbours until at most
-    regions are left and each has min_area and min_radius. Area is cheap
-    to count, so thinness is measured only once the sizes are right."""
+    regions are left and each has min_area and min_radius; neighbours that
+    end up one colour become one region in every round, so the count aimed
+    at is the count reached. Area is cheap to count, so thinness is
+    measured only once the sizes are right. Regions of colour ink (the
+    picture's own outlines) stay, take what is too small between them,
+    and do not count."""
     thin_rounds = 0
     while True:
         n = len(colour_of)
+        is_ink = colour_of == ink
         area = np.bincount(labels.ravel(), minlength=n)
-        small = area < min_area
-        if n > regions:
+        small = (area < min_area) & ~is_ink
+        real = n - int(is_ink.sum())
+        if real > regions:
             # The smallest ones above the limit as well; a few at a time
             # so that the rest are measured again after.
-            small[np.argsort(area)[:max(1, (n - regions) // 4)]] = True
+            order = np.argsort(np.where(is_ink, np.iinfo(np.int64).max, area))
+            small[order[:max(1, (real - regions) // 4)]] = True
         if not small.any():
-            small = radii(labels, inner_distance(labels), n) < min_radius
+            small = (radii(labels, inner_distance(labels), n) < min_radius) & ~is_ink
             if not small.any() or thin_rounds == 4:
-                # Neighbours that ended up the same colour become one region.
-                return components(colour_of[labels], colour_of.max() + 1)
+                return labels, colour_of
             thin_rounds += 1
-        best = best_neighbours(labels, n, small)
+        a, b, g = border_pairs(labels, strength)
+        best = best_neighbours(a, b, g, n, small, colour_lab[colour_of], is_ink)
         # Each small region points to its best neighbour; chains and
         # pairs pointing at each other end in the larger region.
         parent = np.arange(n)
         go = small & (best >= 0)
         parent[go] = best[go]
+        ids = np.arange(n)
         for _ in range(64):
             nxt = parent[parent]
             # A pair pointing at each other: the larger keeps itself.
-            loop = (nxt == np.arange(n)) & (parent != np.arange(n))
-            ids = np.arange(n)
+            loop = (nxt == ids) & (parent != ids)
             loop &= (area > area[parent]) | ((area == area[parent]) & (ids > parent))
-            parent[loop] = np.arange(n)[loop]
+            parent[loop] = ids[loop]
             nxt = parent[parent]
             if (nxt == parent).all():
                 break
             parent = nxt
-        roots, new = np.unique(parent, return_inverse=True)
+        # Neighbours now of one colour become one region.
+        a, b = parent[a], parent[b]
+        same = (a != b) & (colour_of[a] == colour_of[b])
+        a, b = a[same], b[same]
+        for _ in range(64):
+            if not len(a):
+                break
+            low = np.minimum(parent[a], parent[b])
+            np.minimum.at(parent, parent[a], low)
+            np.minimum.at(parent, parent[b], low)
+            parent = roots(parent)
+            if (parent[a] == parent[b]).all():
+                break
+        kept, new = np.unique(parent, return_inverse=True)
         labels = new[labels].astype(np.int32)
-        colour_of = colour_of[roots]
+        colour_of = colour_of[kept]
+
+
+def label_points(labels, n):
+    """Where each region's number goes: among its widest pixels (at
+    least nine tenths of its largest distance from its edge) the one
+    nearest its middle, so a long region has it in the middle and not at
+    one end. (rows, columns, radius) per region."""
+    h, w = labels.shape
+    dist = inner_distance(labels)
+    radius = radii(labels, dist, n)
+    flat = labels.ravel()
+    top = np.flatnonzero(dist.ravel() >= radius[flat] * 0.9)
+    ys, xs = np.divmod(top, w)
+    area = np.bincount(flat, minlength=n).clip(1)
+    all_y, all_x = np.divmod(np.arange(h * w), w)
+    cy = np.bincount(flat, all_y, n) / area
+    cx = np.bincount(flat, all_x, n) / area
+    of = flat[top]
+    far = (ys - cy[of]) ** 2 + (xs - cx[of]) ** 2
+    order = np.lexsort((far, of))
+    first = np.ones(len(order), bool)
+    first[1:] = of[order][1:] != of[order][:-1]
+    pick = top[order[first]]
+    rows, cols = np.divmod(pick, w)
+    return rows, cols, dist.ravel()[pick]
 
 
 def trace(labels):
@@ -360,10 +507,15 @@ def rings(chains, n):
 
 
 def picture(img, regions=300, colours=18, side=SIDE, detail=5, crop=None,
-            min_area=None, min_radius=2.5, tolerance=0.25, timing=None, progress=None):
-    """The region picture of a PIL image as a dict: w, h, palette, and
-    regions [(colour number from 0, label (x, y, r), rings)]. progress, if
-    given, is called with how much is done (0 to 1) after each step."""
+            min_area=None, min_radius=MIN_RADIUS, tolerance=0.25, ink=False, timing=None,
+            progress=None, raster=False):
+    """The region picture of a PIL image as a dict: w, h, palette,
+    regions [(colour number from 0, label (x, y, r), rings)] and ink
+    [rings] (the picture's own outlines, kept black, when ink). progress,
+    if given, is called with how much is done (0 to 1) after each step.
+    raster: also the pixels it was made from, for the bench and tests:
+    "raster" (rgb, labels, colour of each label, colours, ink colour or
+    None, and per label its number's row, column and radius)."""
     t = [time.monotonic()]
 
     def lap(name):
@@ -373,22 +525,34 @@ def picture(img, regions=300, colours=18, side=SIDE, detail=5, crop=None,
         if progress is not None:
             progress(DONE_AFTER[name.split()[0]])
 
-    idx, keep = reduce(img, side, colours, detail, crop)
+    rgb = shrink(img, side, crop)
+    lines = ink_lines(rgb) if ink else None
+    if lines is not None:
+        # The colours come from round the lines, not from the lines.
+        _d, (iy, ix) = ndimage.distance_transform_edt(lines, return_indices=True)
+        rgb_fill = rgb[iy, ix]
+    else:
+        rgb_fill = rgb
+    lap("shrink")
+    idx, count = reduce(guided(rgb_fill), colours, detail)
+    keep = mean_colours(idx, rgb_fill, count)
+    ink_colour = None
+    if lines is not None:
+        ink_colour = count
+        idx = np.where(lines, count, idx)
+        keep.append(INK)
     lap("reduce")
     labels, colour_of = components(idx, len(keep))
     lap("components %d" % len(colour_of))
     h, w = labels.shape
     if min_area is None:
         min_area = w * h / regions / 30
-    labels, colour_of = merge(labels, colour_of, regions, min_area, min_radius)
+    colour_lab = lab(np.array(keep, np.uint8))
+    labels, colour_of = merge(labels, colour_of, colour_lab, edges(rgb), regions,
+                              min_area, min_radius, ink_colour)
     lap("merge %d" % len(colour_of))
-    dist = inner_distance(labels)
     n = len(colour_of)
-    radius = radii(labels, dist, n)
-    # Where each region is widest: the first pixel at its largest distance.
-    top = np.flatnonzero(dist.ravel() == radius[labels.ravel()])
-    _, first = np.unique(labels.ravel()[top], return_index=True)
-    where = [divmod(int(i), w) for i in top[first]]
+    rows, cols, radius = label_points(labels, n)
     lap("labels")
     chains = []
     for xs, ys, left, right in trace(labels):
@@ -397,38 +561,50 @@ def picture(img, regions=300, colours=18, side=SIDE, detail=5, crop=None,
     lap("trace %d" % len(chains))
     outlines = rings(chains, n)
     lap("rings")
-    # Colours that are left, numbered light to dark.
-    present = sorted(set(colour_of.tolist()),
+    # Colours that are left, numbered light to dark (the outlines' black
+    # is not a colour to paint).
+    present = sorted(set(colour_of.tolist()) - {ink_colour},
                      key=lambda i: -(0.299 * keep[i][0] + 0.587 * keep[i][1] + 0.114 * keep[i][2]))
     number = {c: k for k, c in enumerate(present)}
-    return {"w": w, "h": h,
+    extra = {"raster": (rgb, labels, colour_of, keep, ink_colour, rows, cols, radius)} if raster else {}
+    return {**extra, "w": w, "h": h,
             "palette": ["#%02x%02x%02x" % keep[c] for c in present],
             "regions": [(number[int(colour_of[r])],
-                         (where[r][1] + 0.5, where[r][0] + 0.5, float(radius[r])),
-                         outlines[r]) for r in range(n)]}
+                         (cols[r] + 0.5, rows[r] + 0.5, float(radius[r])),
+                         outlines[r]) for r in range(n) if colour_of[r] != ink_colour],
+            "ink": [outlines[r] for r in range(n) if colour_of[r] == ink_colour]}
 
 
 def to_svg(pic, meta=None):
-    """The picture as SVG text; meta becomes data- attributes of the root."""
-    extra = "".join(" data-%s=%s" % (k, quoteattr(str(v))) for k, v in (meta or {}).items())
-    out = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" '
-           'data-palette="%s" data-count="%d" fill-rule="evenodd"%s>'
-           % (pic["w"], pic["h"], pic["w"], pic["h"], " ".join(pic["palette"]),
-              len(pic["regions"]), extra)]
-    for n, (x, y, r), outline in pic["regions"]:
+    """The picture as SVG text; meta becomes data- attributes of the root.
+    data-sig is a fingerprint of the regions, so a picture made again
+    differently does not take the progress of the old one."""
+    def path(outline):
         # Pairs after M are line-tos in SVG, so no L is needed.
-        d = ["M" + " ".join("%.1f %.1f" % (px, py) for px, py in ring[:-1]) + "Z"
-             for ring in outline]
-        out.append('<path d="%s" fill="%s" data-n="%d" data-label="%.1f %.1f %.1f"/>'
-                   % ("".join(d), pic["palette"][n], n + 1, x, y, r))
-    out.append("</svg>\n")
-    return "\n".join(out)
+        return "".join("M" + " ".join("%.1f %.1f" % (px, py) for px, py in ring[:-1]) + "Z"
+                       for ring in outline)
+
+    body = ['<path d="%s" fill="%s" data-n="%d" data-label="%.1f %.1f %.1f"/>'
+            % (path(outline), pic["palette"][n], n + 1, x, y, r)
+            for n, (x, y, r), outline in pic["regions"]]
+    sig = hashlib.sha1("\n".join(body).encode()).hexdigest()[:12]
+    # The picture's own outlines, black, on top of the regions; not
+    # painted, not counted.
+    if pic.get("ink"):
+        body.append('<path d="%s" fill="#%02x%02x%02x" data-ink="1"/>'
+                    % (("".join(path(outline) for outline in pic["ink"]),) + INK))
+    extra = "".join(" data-%s=%s" % (k, quoteattr(str(v))) for k, v in (meta or {}).items())
+    head = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" '
+            'data-palette="%s" data-count="%d" data-sig="%s" fill-rule="evenodd"%s>'
+            % (pic["w"], pic["h"], pic["w"], pic["h"], " ".join(pic["palette"]),
+               len(pic["regions"]), sig, extra))
+    return "\n".join([head] + body + ["</svg>\n"])
 
 
 # How much of the work is done after each step of picture(), roughly as
 # the steps take on the tablet (merging is most of it).
-DONE_AFTER = {"reduce": 0.15, "components": 0.2, "merge": 0.65, "labels": 0.75,
-              "trace": 0.9, "rings": 0.95}
+DONE_AFTER = {"shrink": 0.05, "reduce": 0.15, "components": 0.2, "merge": 0.65,
+              "labels": 0.75, "trace": 0.9, "rings": 0.95}
 
 
 def write(pic, path, meta=None):
@@ -451,6 +627,10 @@ def main():
     args.add_argument("-v", "--verbose", action="store_true")
     args.add_argument("--progress", action="store_true",
                       help='print "progress F" lines, F the share done')
+    args.add_argument("--big-numbers", action="store_true",
+                      help="no region too thin for a number read without zooming far in")
+    args.add_argument("--ink", action="store_true",
+                      help="keep the picture's own black outlines (prints, drawings)")
     opts = args.parse_args()
     regions, colours, detail = LEVELS[opts.level]
     timing = []
@@ -460,8 +640,11 @@ def main():
         print("progress %.2f" % done, flush=True)
 
     pic = picture(Image.open(opts.image), regions, colours, opts.side, detail, opts.crop,
-                  timing=timing, progress=progress if opts.progress else None)
-    write(pic, opts.out, dict(kv.split("=", 1) for kv in opts.set))
+                  min_radius=MIN_RADIUS_BIG if opts.big_numbers else MIN_RADIUS,
+                  ink=opts.ink, timing=timing, progress=progress if opts.progress else None)
+    meta = {"mode": " ".join(m for m, on in (("big", opts.big_numbers), ("ink", opts.ink)) if on)}
+    meta.update(kv.split("=", 1) for kv in opts.set)
+    write(pic, opts.out, {k: v for k, v in meta.items() if v})
     if opts.progress:
         progress(1)
     if opts.verbose:

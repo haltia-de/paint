@@ -29,12 +29,14 @@ WAITING, RUNNING, DONE, CANCELLED = "waiting", "running", "done", "cancelled"
 class Job:
     """One image to make into a picture; see Conversion.submit."""
 
-    def __init__(self, conversion, source, out, level, meta, urgent, on_progress, on_done):
+    def __init__(self, conversion, source, out, level, meta, urgent, on_progress, on_done,
+                 flags=()):
         self.conversion = conversion
         self.source = source
         self.out = out
         self.level = level
         self.meta = meta or {}
+        self.flags = list(flags)
         self.urgent = urgent
         self.on_progress = on_progress
         self.on_done = on_done
@@ -67,12 +69,13 @@ class Conversion:
         threading.Thread(target=self.work, daemon=True).start()
 
     def submit(self, source, out, level, meta=None, urgent=False,
-               on_progress=None, on_done=None):
+               on_progress=None, on_done=None, flags=()):
         """Make source (an image file's path, or its bytes) into the
         picture out at level (pbn.LEVELS), with meta as its data-
-        attributes. Urgent work goes before background work, and stops
+        attributes and flags as more of pbn.py's options (--big-numbers,
+        --ink). Urgent work goes before background work, and stops
         background work that is running."""
-        job = Job(self, source, out, level, meta, urgent, on_progress, on_done)
+        job = Job(self, source, out, level, meta, urgent, on_progress, on_done, flags)
         with self.lock:
             (self.urgent if urgent else self.background).append(job)
             if urgent and self.running is not None and not self.running.urgent:
@@ -155,6 +158,7 @@ class Conversion:
         cmd = [self.python, self.pbn, "--progress", "--level", str(job.level), source, job.out]
         for key, value in job.meta.items():
             cmd += ["--set", "%s=%s" % (key, value)]
+        cmd += job.flags
         log = tempfile.TemporaryFile()
         try:
             with self.lock:

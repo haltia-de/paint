@@ -10,6 +10,8 @@ import time
 def main():
     # --progress --level N SOURCE OUT [--set KEY=VALUE ...], as Conversion runs it
     source, out = sys.argv[4:6]
+    with open(out + ".args", "w") as fh:
+        fh.write(" ".join(sys.argv[1:]))
     log = os.environ["FAKE_PBN_LOG"]
     with open(log, "a") as fh:
         fh.write("start %s\n" % os.path.basename(out))
