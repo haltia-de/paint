@@ -17,10 +17,12 @@ has paplay but not GStreamer's PulseAudio output, a desktop's PipeWire
 takes paplay too, and nothing is loaded into the program. Without paplay
 it stays silent.
 
-The buzz is an event of feedbackd (the tablet shell's), over D-Bus, with
-the "quiet" profile so feedbackd only vibrates and plays no sound of its
-own; feedbackd's own level (silent) still wins. Without feedbackd
-nothing buzzes.
+The buzz is the Haltia shell's own, haltia-press (the motor itself, 70 ms
+a pulse, as the panel's buttons buzz): one pulse for a tap, two for a
+colour, three for a picture. feedbackd took the events on the tablet but
+its motor never moved (4.7.2), so it is only what is tried without
+haltia-press: an event over D-Bus with the "quiet" profile, so it only
+vibrates. Without either nothing buzzes.
 
 The tap buzz: the Haltia shell buzzes every tap itself, unless the
 program in front says it answers touches itself (X-Haltia-Own-Feedback
@@ -28,7 +30,8 @@ in its .desktop file, haltia-shell 2.8); then the shell keeps
 $XDG_RUNTIME_DIR/haltia/quiet-taps while it is in front, and only then
 does tapped() buzz, as long as the shell's own (touchguard's buzz_ms)
 is not 0. So a miss is not felt, and with an older shell, or none, taps
-are buzzed once, by the shell or not at all. Each is tried and forgotten: nothing here waits or fails.
+are buzzed once, by the shell or not at all. Each is tried and
+forgotten: nothing here waits or fails.
 """
 import os
 import shutil
@@ -43,6 +46,11 @@ TAP_EVENT = "bell-terminal"  # 100 ms, near the shell's 70
 # Which taps on the picture buzz (Настройки): a right one, a miss, both
 # or none.
 TAP_BUZZES = ("hit", "miss", "both", "none")
+# The shell's buzz (a pulse of the motor), and pulses a gap apart for each
+# event; feedbackd where the shell has no haltia-press.
+PRESS = "/usr/libexec/haltia/haltia-press"
+PULSES = {TAP_EVENT: 1, COLOUR_EVENT: 2, PICTURE_EVENT: 3}
+GAP_MS = 180
 # The shell's tap buzz: its length (0: none) in this file.
 TOUCHGUARD = "/etc/haltia/touchguard.conf"
 
@@ -111,6 +119,21 @@ class Feedback:
 
     @staticmethod
     def _buzz(app_id, event):
+        if os.access(PRESS, os.X_OK):
+            from gi.repository import GLib
+
+            def pulse():
+                try:
+                    # Its mark for a panel button of this name stays unused.
+                    subprocess.Popen([PRESS, "paint"], stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except OSError as exc:
+                    sys.stderr.write("haltia-paint: %s: %s\n" % (PRESS, exc))
+                return False
+
+            for k in range(PULSES.get(event, 1)):
+                GLib.timeout_add(k * GAP_MS, pulse)
+            return
         try:
             from gi.repository import Gio, GLib
             bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)

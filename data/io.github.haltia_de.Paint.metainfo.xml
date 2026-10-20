@@ -19,6 +19,22 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
+    <release version="4.7.2" date="2026-10-20">
+      <description>
+        <ul>
+          <li>On the tablet «Другая папка…» (another folder) opens again: the program no longer crashes.</li>
+          <li>Taps buzz again: Раскраска buzzes the motor as the panel's buttons do. Two short buzzes at a colour's end, three at a picture's.</li>
+          <li>The pictures on the gallery's cards are larger and fill the card, with no empty space below.</li>
+          <li>Six pictures are gone: «Спящая кошка», «Узорная бабочка», «Север», «Над вечным покоем», «Радуга над морем» and «Среди волн».</li>
+        </ul>
+        <ul>
+          <li xml:lang="ru">На планшете «Другая папка…» снова открывается: программа больше не падает.</li>
+          <li xml:lang="ru">Вибрация при нажатии снова есть: «Раскраска» вибрирует мотором так же, как кнопки панели. В конце цвета — две короткие вибрации, в конце картины — три.</li>
+          <li xml:lang="ru">Картинки на карточках галереи стали крупнее и занимают всю карточку, без пустого места внизу.</li>
+          <li xml:lang="ru">Убраны шесть картин: «Спящая кошка», «Узорная бабочка», «Север», «Над вечным покоем», «Радуга над морем» и «Среди волн».</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.7.1" date="2026-10-20">
       <description>
         <p>A miss no longer buzzes: Раскраска buzzes right taps and buttons itself, and the Haltia shell (from 2.8) stops buzzing for it. Настройки choose which taps on the picture buzz: right ones, misses, both or none. With an older shell everything stays as it was.</p>

@@ -9,8 +9,8 @@ bottom has one big button per number. Pick a colour, tap its regions.
   striped (or as chosen in Настройки) with their number bold, so they are
   easy to find. A region of another number cannot be painted. When a
   colour is done the next one with regions left is chosen, and the
-  palette scrolls to it, with a soft bell and a short buzz (feedbackd,
-  where there is one; haltia_paint.feedback); the header shows how far
+  palette scrolls to it, with a soft bell and two short buzzes (the shell's haltia-press;
+  haltia_paint.feedback); the header shows how far
   the picture is. With three regions or fewer of the chosen colour left,
   each gets a blue ring, seen at any zoom.
 - A tap a little beside a region of the chosen number still paints it:
@@ -148,7 +148,7 @@ gi.require_version("GLibUnix", "2.0")
 gi.require_version("GdkPixbuf", "2.0")
 from haltia_kit import dialogs, paths  # noqa: E402
 from haltia_kit.settings import Settings  # noqa: E402
-from gi.repository import Gdk, GdkPixbuf, Gio, GLibUnix, GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, GdkPixbuf, Gio, GLibUnix, Gtk, Pango  # noqa: E402
 
 # Installed as PREFIX/bin/haltia-paint: the pictures are in
 # PREFIX/share/haltia-paint, the generator in PREFIX/lib/haltia-paint; in a
@@ -968,9 +968,15 @@ def whole_picture(pic, width, height, fill, outline=None, ink=INK):
     return image
 
 
+# Gallery thumbnails are drawn this large at most (a card shows them
+# smaller or so, as it has room), and kept so.
+THUMB = 440, 310
+
+
 def thumbnail(pic, filled, finished, colour_new=False):
-    """The gallery picture, kept as a PNG until the progress changes; one
-    not begun in its colours with colour_new (Настройки), else pale."""
+    """The gallery picture, kept as a PNG until the progress changes (or
+    one kept before 4.7.2, smaller); one not begun in its colours with
+    colour_new (Настройки), else pale."""
     finished = finished or (colour_new and not filled)
     path = os.path.join(DATA, "thumbs", pic["id"] + ("-colour" if finished and not filled else "")
                         + ".png")
@@ -980,7 +986,9 @@ def thumbnail(pic, filled, finished, colour_new=False):
         newest = pic.get("mtime", 0)
     try:
         if os.path.getmtime(path) >= newest:
-            return cairo.ImageSurface.create_from_png(path)
+            kept = cairo.ImageSurface.create_from_png(path)
+            if kept.get_width() >= THUMB[0] - 2 or kept.get_height() >= THUMB[1] - 2:
+                return kept
     except (OSError, cairo.Error):
         pass
     loaded = "regions" in pic
@@ -988,7 +996,7 @@ def thumbnail(pic, filled, finished, colour_new=False):
     full = [hex_rgb(c) for c in pic["palette"]]
     # Still to paint: a pale version, so the picture shows.
     pale = [(0.72 + 0.28 * r, 0.72 + 0.28 * g, 0.72 + 0.28 * b) for r, g, b in full]
-    image = whole_picture(pic, 320, 220, lambda i: (full if finished or i in filled else pale)
+    image = whole_picture(pic, THUMB[0], THUMB[1], lambda i: (full if finished or i in filled else pale)
                           [regs[i].n], ink=INK_PREVIEW)
     if not loaded:
         # Not needed again until the picture is opened.
@@ -2083,7 +2091,10 @@ class Paint:
         self.replay = self.settings.get_bool("replay", True)
         # Every button tapped is felt: the shell leaves taps to the program
         # while it is in front (X-Haltia-Own-Feedback), misses unfelt.
-        GObject.add_emission_hook(Gtk.Button, "clicked", self.button_felt)
+        # Seen in every event before GTK takes it (dialogs too), not by a
+        # hook on "clicked": that broke GTK's file chooser (4.7.1).
+        self.pressed = None  # (the button, x, y) a finger went down on
+        Gdk.event_handler_set(self.on_any_event)
         # The kind of picture a preview makes, kept from one to the next.
         self.big_numbers, self.ink = True, 0
         self.pool = Workers(3)
@@ -2393,32 +2404,39 @@ class Paint:
         filled = load_progress(pic)
         done, total = share_done(pic, filled)
         self.card_states[pic["id"]] = "new" if not done else ("done" if done >= total else "begun")
+        # The thumbnail takes what room the card has: the cards of a
+        # section are as high as its highest (one begun has a bar and a
+        # button more), and a fixed one left the others empty below.
         thumb = Gtk.DrawingArea()
-        tw, th = 320, 220
-        thumb.set_size_request(tw, th)
+        thumb.set_size_request(320, 220)
         self.thumbs.pop(pic["id"], None)
         asked = []
 
         def draw(widget, cr):
+            w, h = widget.get_allocated_width(), widget.get_allocated_height()
             image = self.thumbs.get(pic["id"])
             if image is None:
                 # Kept as PNG most of the time; else drawn in a thread
                 # while a pale square stands in.
                 cr.set_source_rgb(0.93, 0.93, 0.92)
-                cr.rectangle(30, 10, tw - 60, th - 20)
+                cr.rectangle(w * 0.1, h * 0.05, w * 0.8, h * 0.9)
                 cr.fill()
                 if not asked:
                     asked.append(True)
                     self.thumb_pool.submit(self.make_thumb, pic, filled, done == total, widget)
                 return False
-            cr.set_source_surface(image, (tw - image.get_width()) // 2,
-                                  (th - image.get_height()) // 2)
+            iw, ih = image.get_width(), image.get_height()
+            k = min(w / iw, h / ih, 1.25)
+            cr.translate((w - iw * k) / 2, (h - ih * k) / 2)
+            cr.scale(k, k)
+            cr.set_source_surface(image, 0, 0)
+            cr.get_source().set_filter(cairo.FILTER_GOOD)
             cr.paint()
             return False
 
         thumb.connect("draw", draw)
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        inner.pack_start(thumb, False, False, 0)
+        inner.pack_start(thumb, True, True, 0)
         name = Gtk.Label(label=pic["name"])
         name.set_line_wrap(True)
         name.set_justify(Gtk.Justification.CENTER)
@@ -3526,9 +3544,25 @@ class Paint:
         threading.Thread(target=work, daemon=True).start()
 
     # settings
-    def button_felt(self, *_args):
-        self.feedback.tapped()
-        return True  # keep the hook
+    def on_any_event(self, event, *_data):
+        """Every event, then handed to GTK: a button tapped (lifted where it
+        went down, on a button that is on) buzzes."""
+        kind = event.get_event_type()
+        if kind in (Gdk.EventType.TOUCH_BEGIN, Gdk.EventType.BUTTON_PRESS):
+            widget = Gtk.get_event_widget(event)
+            while widget is not None and not isinstance(widget, Gtk.Button):
+                widget = widget.get_parent()
+            ok, x, y = event.get_root_coords()
+            self.pressed = (widget, x, y) if widget is not None and ok else None
+        elif kind in (Gdk.EventType.TOUCH_END, Gdk.EventType.BUTTON_RELEASE) and self.pressed:
+            button, x0, y0 = self.pressed
+            self.pressed = None
+            ok, x, y = event.get_root_coords()
+            # A tap, not a scroll that began on a button.
+            if ok and abs(x - x0) <= TAP_SLOP and abs(y - y0) <= TAP_SLOP \
+                    and button.is_sensitive() and button.get_mapped():
+                self.feedback.tapped()
+        Gtk.main_do_event(event)
 
     def int_setting(self, key, default, choices):
         """A number of Настройки that is one of choices, else default."""

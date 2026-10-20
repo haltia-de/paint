@@ -1,3 +1,12 @@
+haltia-paint (4.7.2) unstable; urgency=medium
+
+  * «Другая папка…» no longer crashes (no emission hook on clicked);
+    buzzes through haltia-press, as feedbackd's never moved the motor;
+    gallery thumbnails larger, filling their cards; six built-in
+    pictures taken out.
+
+ -- Haltia <rensomail@gmail.com>  Tue, 20 Oct 2026 20:30:00 +0300
+
 haltia-paint (4.7.1) unstable; urgency=medium
 
   * The program buzzes its own taps, not a miss (X-Haltia-Own-Feedback,

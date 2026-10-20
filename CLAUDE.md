@@ -26,7 +26,9 @@ hidden entry, and `main()` moves `~/.local/share/b8k-paint` to `haltia-paint`
 The shell's GTK theme sizes the header and dialogs. The shell buzzes every
 tap, except for a program whose .desktop says `X-Haltia-Own-Feedback=true`
 (haltia-shell 2.8): this one does, so it buzzes its own taps (buttons,
-right taps on the board, through `Feedback.tapped`) and not a miss. Don't
+right taps on the board, through `Feedback.tapped`) and not a miss. Buttons
+are seen in `Gdk.event_handler_set` (lifted where they went down): a
+GObject emission hook on Gtk.Button "clicked" crashed GTK's file chooser. Don't
 edit the lenovo repo; tell its session the new tag.
 
 ## Running and installing
@@ -91,8 +93,9 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   - `haltia_paint/feedback.py` — Отклик: a sound (`data/sounds/*.oga`,
     made by `data/sounds/make-sounds.py`, played by `paplay`: the tablet
     has PulseAudio but not GStreamer's PulseAudio output) and a buzz
-    (feedbackd over D-Bus with the "quiet" profile, so it only
-    vibrates) when a colour or the picture is done; a quiet sound and
+    (the shell's haltia-press, a 70 ms pulse of the motor: one for a tap,
+    two for a colour, three for a picture; feedbackd only without it, as
+    on the tablet its motor never moved) when a colour or the picture is done; a quiet sound and
     no buzz for a miss; `tapped()` buzzes the other taps, only while the
     shell leaves them to the program (`$XDG_RUNTIME_DIR/haltia/quiet-taps`).
   - `haltia_paint/sections.py` — Разделы галереи: the gallery's sections
