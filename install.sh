@@ -29,6 +29,10 @@ rm -rf "$root$prefix/lib/b8k-paint" "$share/b8k-paint"
 rm -f "$root/usr/local/share/b8k/apps.d/paint.conf" "$root/usr/local/share/b8k/paint.svg"
 # The generator, for photos and found paintings.
 install -D -m 644 "$here/pbn.py" "$root$prefix/lib/haltia-paint/pbn.py"
+# The program's own modules (haltia_paint/), beside the generator.
+rm -rf "$root$prefix/lib/haltia-paint/haltia_paint"
+install -d -m 755 "$root$prefix/lib/haltia-paint/haltia_paint"
+install -m 644 "$here"/haltia_paint/*.py "$root$prefix/lib/haltia-paint/haltia_paint/"
 # The built-in pictures (make-paintings.py makes them); where version 2
 # kept them, they go.
 rm -rf "$share/haltia-paint" "$root/usr/local/share/b8k/paint"

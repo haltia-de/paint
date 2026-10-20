@@ -51,7 +51,8 @@ window buttons. Its folders were called b8k-paint before 4.0 and move on the fir
 Pictures: the built-in ones in PREFIX/share/haltia-paint/, and any photo
 put into Изображения/Раскраски (JPEG or PNG; ~/Раскраски before 4.1,
 moved there on the first start), which is turned into a picture of
-about 300 regions in the background the first time the gallery sees it.
+about 300 regions in the background the first time the gallery sees it;
+one that cannot be gets a line with «Ещё раз».
 
 The gallery is built once and kept: closing a picture redraws only its
 card; the first screenful shows at once and the other cards come while
@@ -69,7 +70,9 @@ licence and most paintings are in the public domain. A tap on a result
 shows it large with its artist and year, as it will look painted at the
 chosen size of regions (a tap on it shows the painting itself). pbn.py
 makes it in a process of its own at low priority, as it takes 15 to 30
-seconds on the tablet. "Загрузить" keeps it in
+seconds on the tablet, with a bar of how far it is; only one pbn.py runs
+at a time (haltia_paint.convert): the preview goes before photos, and
+leaving it stops its work. "Загрузить" keeps it in
 ~/.local/share/haltia-paint/downloaded/, shown in its own gallery section,
 where "✕ Убрать" takes it out again. Only https requests to
 wikidata.org, commons.wikimedia.org and the Wikimedia image hosts are
@@ -86,7 +89,6 @@ import queue
 import re
 import shutil
 import signal
-import subprocess
 import sys
 import threading
 import time
@@ -137,6 +139,11 @@ WORK = os.path.join(DATA, "work")
 PBN = next((p for p in (os.path.join(HERE, "pbn.py"),
                         os.path.join(PREFIX, "lib", "haltia-paint", "pbn.py"))
             if os.path.exists(p)), os.path.join(PREFIX, "lib", "haltia-paint", "pbn.py"))
+# The program's own modules (haltia_paint/): beside it in a checkout, else
+# with the generator.
+sys.path.insert(0, HERE if os.path.isdir(os.path.join(HERE, "haltia_paint"))
+                else os.path.join(PREFIX, "lib", "haltia-paint"))
+from haltia_paint.convert import Conversion  # noqa: E402
 # Gallery sections, easier further up: a level, or a theme that has a
 # section of its own (its pictures then show there, whatever the level).
 SECTIONS = (
@@ -203,6 +210,7 @@ CSS = b"""
 window, .paint-bg { background-color: #e6e6e4; }
 headerbar label.title { font-size: 34px; font-weight: bold; color: #2e3436; }
 .bar { background-color: #dcdcda; padding: 8px; }
+progressbar trough, progressbar progress { min-height: 14px; border-radius: 7px; }
 .bar button, .card {
   font-size: 26px;
   min-height: 72px;
@@ -319,25 +327,6 @@ button.get:disabled { background-color: #99c1f1; border-color: #99c1f1; }
 
 # --- pictures -----------------------------------------------------------------
 SVG = "{http://www.w3.org/2000/svg}"
-
-
-def make_picture(source, out, level, meta):
-    """Turn an image file into a picture with pbn.py, in a process of its
-    own at low priority so the screen stays quick; True when written."""
-    cmd = [sys.executable, PBN, "--level", str(level), source, out]
-    for key, value in meta.items():
-        cmd += ["--set", "%s=%s" % (key, value)]
-    try:
-        run = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.PIPE, timeout=600,
-                             preexec_fn=lambda: os.nice(10))
-    except (OSError, subprocess.SubprocessError) as exc:
-        sys.stderr.write("haltia-paint: %s: %s\n" % (source, exc))
-        return False
-    if run.returncode:
-        sys.stderr.write("haltia-paint: %s: %s\n" % (source, run.stderr.decode(errors="replace")[-500:]))
-        return False
-    return True
 
 
 # What the gallery needs of each picture file, kept by path with its size
@@ -584,6 +573,18 @@ def photo_path(path):
     st = os.stat(path)
     key = hashlib.sha1(("pbn|%s|%d|%d" % (path, st.st_size, st.st_mtime)).encode()).hexdigest()[:16]
     return "photo-" + key, os.path.join(DATA, "photos", key + ".svgz")
+
+
+def failed_mark(path):
+    """The file that says a photo could not be made into a picture."""
+    return photo_path(path)[1][:-len(".svgz")] + ".failed"
+
+
+def photo_failed(path):
+    try:
+        return os.path.exists(failed_mark(path))
+    except OSError:
+        return False
 
 
 def load_pictures():
@@ -1710,9 +1711,9 @@ class Paint:
         self.search_gen = 0
         self.preview_item = None
         self.pool = Workers(3)
-        # Photos being made into pictures, one at a time.
-        self.photo_jobs = set()
-        self.photo_pool = Workers(1)
+        # pbn.py, one at a time: previews first, then photos (Преобразование).
+        self.conversion = Conversion(PBN, notify=GLib.idle_add)
+        self.photo_jobs = {}  # photo path -> its job
         # Gallery thumbnails not kept yet are drawn here, one at a time.
         self.thumb_pool = Workers(1)
         self.thumbs = {}  # picture id -> its thumbnail surface
@@ -1757,6 +1758,8 @@ class Paint:
         sections = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         pictures, waiting = self.pictures if self.pictures else load_pictures()
         self.pictures = None
+        failed = [p for p in waiting if photo_failed(p)]
+        waiting = [p for p in waiting if p not in failed]
         for path in waiting:
             self.make_photo(path)
         own = {key for key, _heading in SECTIONS if isinstance(key, str)}
@@ -1794,7 +1797,21 @@ class Paint:
             note.set_line_wrap(True)
             note.set_margin_start(20)
             sections.pack_start(note, False, False, 0)
-        if not pictures and not waiting:
+        for path in failed:
+            row = Gtk.Box(spacing=16)
+            row.set_margin_start(20)
+            row.set_margin_end(20)
+            note = Gtk.Label(label="Не получилось сделать раскраску из «%s»"
+                             % os.path.splitext(os.path.basename(path))[0], xalign=0)
+            note.get_style_context().add_class("note")
+            note.set_line_wrap(True)
+            row.pack_start(note, True, True, 0)
+            again = Gtk.Button(label="Ещё раз")
+            again.get_style_context().add_class("reset")
+            again.connect("clicked", lambda _b, p=path: self.photo_again(p))
+            row.pack_start(again, False, False, 0)
+            sections.pack_start(row, False, False, 0)
+        if not pictures and not waiting and not failed:
             sections.pack_start(Gtk.Label(label="Нет картинок"), True, True, 0)
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -1828,6 +1845,8 @@ class Paint:
         return False
 
     def scroll_to_last(self, scroll, sections):
+        if scroll.get_toplevel() is not self.win:
+            return False  # the gallery was built again meanwhile
         y = 0
         card = self.cards.get(read_last())
         if card:
@@ -1842,28 +1861,35 @@ class Paint:
         shows it when it is ready."""
         if path in self.photo_jobs:
             return
-        self.photo_jobs.add(path)
+        try:
+            _pic_id, out = photo_path(path)
+        except OSError:
+            return
+        name = os.path.splitext(os.path.basename(path))[0]
+        self.photo_jobs[path] = self.conversion.submit(
+            path, out, 3, {"name": name, "level": 9},
+            on_done=lambda _job, ok: self.photo_ready(path, ok))
 
-        def work():
+    def photo_ready(self, path, ok):
+        self.photo_jobs.pop(path, None)
+        if not ok:
+            # Tried again only from its "Ещё раз" button.
             try:
-                _pic_id, out = photo_path(path)
-                os.makedirs(os.path.dirname(out), exist_ok=True)
-                name = os.path.splitext(os.path.basename(path))[0]
-                if not make_picture(path, out, 3, {"name": name, "level": 9}):
-                    return
+                with open(failed_mark(path), "w"):
+                    pass
             except OSError:
-                return
-            GLib.idle_add(self.photo_ready, path)
-
-        self.photo_pool.submit(work)
-
-    def photo_ready(self, path):
-        self.photo_jobs.discard(path)
+                pass
         if self.stack.get_visible_child_name() == "gallery":
             self.show_gallery(rebuild=True)
         else:
             self.gallery_stale = True
-        return False
+
+    def photo_again(self, path):
+        try:
+            os.remove(failed_mark(path))
+        except OSError:
+            pass
+        self.show_gallery(rebuild=True)
 
     def fill_card(self, slot, pic):
         """A picture's card in slot (made again when its progress changed):
@@ -1987,6 +2013,7 @@ class Paint:
     def show_photos(self):
         """The pictures on the tablet, newest first, as in Галерея; a tap
         shows one as it will be painted."""
+        self.leave_preview()
         self.preview_item = None
         old = self.stack.get_child_by_name("preview")
         if old:
@@ -2098,6 +2125,7 @@ class Paint:
         """The search page; it keeps its results while a painting is viewed."""
         if self.search_page is None:
             self.build_search()
+        self.leave_preview()
         self.preview_item = None
         old = self.stack.get_child_by_name("preview")
         if old:
@@ -2261,6 +2289,7 @@ class Paint:
     def show_preview(self, item):
         """The painting large, as each size of regions will paint it, and
         "Загрузить"."""
+        self.leave_preview()
         self.preview_item = item
         item.setdefault("pics", {})
         old = self.stack.get_child_by_name("preview")
@@ -2284,6 +2313,9 @@ class Paint:
         self.view_note = Gtk.Label()
         self.view_note.get_style_context().add_class("note")
         left.pack_start(self.view_note, False, False, 0)
+        self.view_progress = Gtk.ProgressBar()
+        self.view_progress.set_no_show_all(True)
+        left.pack_start(self.view_progress, False, False, 0)
         box.pack_start(left, True, True, 0)
 
         side = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -2312,7 +2344,7 @@ class Paint:
         for n, grade in enumerate(GRADES):
             b = Gtk.Button(label=grade[1])
             b.get_style_context().add_class("grade")
-            b.connect("clicked", lambda _b, g=grade: self.choose_grade(g))
+            b.connect("clicked", lambda _b, g=grade: self.pick_grade(g))
             grid.attach(b, n % 2, n // 2, 1, 1)
             self.grade_buttons.append((b, grade))
         side.pack_start(grid, False, False, 0)
@@ -2357,47 +2389,60 @@ class Paint:
         return False
 
     def convert_grades(self, item):
-        """Make the picture of the chosen size of regions in the
-        background, then of any other size chosen meanwhile; each shows
-        as it is ready."""
-        if item.get("converting"):
+        """Make the picture of the chosen size of regions, before any other
+        work (the person waits for it); each size shows as it is ready."""
+        level = self.grade[0]
+        jobs = item.setdefault("jobs", {})
+        if level in item["pics"] or level in jobs:
             return
-        item["converting"] = True
+        out = os.path.join(WORK, "%s-%d.svgz" % (item["qid"], level))
+        meta = {"name": item["title"], "theme": item["author"], "level": 8,
+                "source": item["file"], "wikidata": item["qid"]}
+        item.setdefault("progress", {})[level] = 0
+        jobs[level] = self.conversion.submit(
+            item["data"], out, level, meta, urgent=True,
+            on_progress=lambda _job, share: self.grade_progress(item, level, share),
+            on_done=lambda _job, ok: self.grade_made(item, level, out, ok))
 
-        def work():
-            try:
-                os.makedirs(WORK, exist_ok=True)
-                source = os.path.join(WORK, item["qid"] + ".img")
-                with open(source, "wb") as fh:
-                    fh.write(item["data"])
-            except OSError as exc:
-                sys.stderr.write("haltia-paint: %s: %s\n" % (WORK, exc))
-                source = None
-            while True:
-                level = self.grade[0]
-                if level in item["pics"] or item is not self.preview_item:
-                    break
-                out = os.path.join(WORK, "%s-%d.svgz" % (item["qid"], level))
-                meta = {"name": item["title"], "theme": item["author"], "level": 8,
-                        "source": item["file"], "wikidata": item["qid"]}
-                pic = None
-                if source and make_picture(source, out, level, meta):
-                    pic = picture_at(out, "preview")
-                if pic:
-                    pic["image"] = whole_picture(
-                        pic, 640, 520, lambda i, p=pic: hex_rgb(p["palette"][p["regions"][i].n]),
-                        lambda i: True)
-                    del pic["regions"], pic["grid"]
-                item["pics"][level] = pic
-                GLib.idle_add(self.grade_ready, item, level)
-            item["converting"] = False
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def grade_ready(self, item, level):
+    def grade_progress(self, item, level, share):
+        item["progress"][level] = share
         if item is self.preview_item and level == self.grade[0]:
-            self.choose_grade(self.grade)
-        return False
+            self.view_progress.set_fraction(share)
+
+    def grade_made(self, item, level, out, ok):
+        """A size made: drawn small in a thread, then shown; None in
+        item["pics"] when it could not be made."""
+        def work():
+            pic = picture_at(out, "preview") if ok else None
+            if pic:
+                pic["image"] = whole_picture(
+                    pic, 640, 520, lambda i, p=pic: hex_rgb(p["palette"][p["regions"][i].n]),
+                    lambda i: True)
+                del pic["regions"], pic["grid"]
+            GLib.idle_add(made, pic)
+
+        def made(pic):
+            item["jobs"].pop(level, None)
+            item["pics"][level] = pic
+            if item is self.preview_item and level == self.grade[0]:
+                self.choose_grade(self.grade)
+            return False
+
+        self.pool.submit(work)
+
+    def leave_preview(self):
+        """The preview is left: the sizes still being made are not wanted."""
+        item = self.preview_item
+        if item:
+            for job in item.get("jobs", {}).values():
+                job.cancel()
+            item["jobs"] = {}
+
+    def pick_grade(self, grade):
+        """A size tapped: one that could not be made is tried again."""
+        if self.preview_item["pics"].get(grade[0], ()) is None:
+            del self.preview_item["pics"][grade[0]]
+        self.choose_grade(grade)
 
     def draw_preview(self, widget, cr):
         item = self.preview_item
@@ -2447,7 +2492,8 @@ class Paint:
         elif grade[0] not in item["pics"]:
             self.view_note.set_text("Готовлю раскраску, это около полуминуты…")
         elif pic is None:
-            self.view_note.set_text("Не получилось сделать раскраску")
+            self.view_note.set_text("Не получилось сделать раскраску. "
+                                    "Нажмите размер, чтобы попробовать ещё раз")
         elif self.show_original:
             self.view_note.set_text("Картина. Нажмите, чтобы увидеть раскраску")
         else:
@@ -2459,6 +2505,9 @@ class Paint:
                                        % (pic["count"], len(pic["palette"])))
         else:
             self.preview_note.set_text("")
+        making = "data" in item and grade[0] not in item["pics"]
+        self.view_progress.set_fraction(item.get("progress", {}).get(grade[0], 0))
+        self.view_progress.set_visible(making)
         self.get_button.set_label("Раскрашивать" if have else "Загрузить")
         self.get_button.set_sensitive(bool(have or pic))
         self.view.queue_draw()
@@ -2488,6 +2537,7 @@ class Paint:
 
     # board
     def open(self, pic):
+        self.leave_preview()
         write_last(pic["id"])
         self.title.set_text(pic["name"])
         self.back_button.show()
@@ -2757,6 +2807,7 @@ class Paint:
 
     def quit(self, *_args):
         self.save()
+        self.conversion.stop()
         self.app.quit()
         return False
 

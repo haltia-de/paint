@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0
 """Paint by number in regions: a picture split into numbered areas.
 
-  pbn.py [--level 3|4|5] [--set name=...] IMAGE OUT.svgz
+  pbn.py [--level 3|4|5] [--set name=...] [--progress] IMAGE OUT.svgz
 
 A painting becomes a map of regions, one colour number each, written as
 SVG: one <path> per region (fill-rule evenodd, holes are inner rings)
@@ -360,15 +360,18 @@ def rings(chains, n):
 
 
 def picture(img, regions=300, colours=18, side=SIDE, detail=5, crop=None,
-            min_area=None, min_radius=2.5, tolerance=0.25, timing=None):
+            min_area=None, min_radius=2.5, tolerance=0.25, timing=None, progress=None):
     """The region picture of a PIL image as a dict: w, h, palette, and
-    regions [(colour number from 0, label (x, y, r), rings)]."""
+    regions [(colour number from 0, label (x, y, r), rings)]. progress, if
+    given, is called with how much is done (0 to 1) after each step."""
     t = [time.monotonic()]
 
     def lap(name):
         t.append(time.monotonic())
         if timing is not None:
             timing.append((name, t[-1] - t[-2]))
+        if progress is not None:
+            progress(DONE_AFTER[name.split()[0]])
 
     idx, keep = reduce(img, side, colours, detail, crop)
     lap("reduce")
@@ -422,6 +425,12 @@ def to_svg(pic, meta=None):
     return "\n".join(out)
 
 
+# How much of the work is done after each step of picture(), roughly as
+# the steps take on the tablet (merging is most of it).
+DONE_AFTER = {"reduce": 0.15, "components": 0.2, "merge": 0.65, "labels": 0.75,
+              "trace": 0.9, "rings": 0.95}
+
+
 def write(pic, path, meta=None):
     """Write the picture as gzipped SVG, replacing path only when done."""
     with gzip.open(path + ".new", "wb", compresslevel=9) as fh:
@@ -440,13 +449,21 @@ def main():
     args.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                       help="a data- attribute of the picture, such as name=...")
     args.add_argument("-v", "--verbose", action="store_true")
+    args.add_argument("--progress", action="store_true",
+                      help='print "progress F" lines, F the share done')
     opts = args.parse_args()
     regions, colours, detail = LEVELS[opts.level]
     timing = []
     start = time.monotonic()
+
+    def progress(done):
+        print("progress %.2f" % done, flush=True)
+
     pic = picture(Image.open(opts.image), regions, colours, opts.side, detail, opts.crop,
-                  timing=timing)
+                  timing=timing, progress=progress if opts.progress else None)
     write(pic, opts.out, dict(kv.split("=", 1) for kv in opts.set))
+    if opts.progress:
+        progress(1)
     if opts.verbose:
         for name, sec in timing:
             print("%-20s %6.2f s" % (name, sec))

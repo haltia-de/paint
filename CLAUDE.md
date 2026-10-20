@@ -28,8 +28,9 @@ edit the lenovo repo; tell its session the new tag.
 
 ## Running and installing
 
-There is no build or test suite (`uvx pyflakes haltia-paint pbn.py
-make-paintings.py` is a quick check). Requirements: Python 3, GTK 3,
+Tests: `python3 -m unittest discover -s tests` (stdlib only, no GTK or
+numpy; the APKBUILD's `check()` runs them); `uvx pyflakes haltia-paint
+pbn.py make-paintings.py haltia_paint tests` is a quick check. Requirements: Python 3, GTK 3,
 PyGObject, pycairo, Pillow; `pbn.py` also needs numpy and scipy (Alpine:
 `apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy`); exact tested versions for a
 Flatpak in `requirements.txt`). No path is built from `~` (`expanduser`): in a Flatpak the home folder
@@ -48,9 +49,10 @@ python3 make-paintings.py CACHE_DIR [SLUG...]  # regenerate pictures/*.svgz from
 python3 pbn.py -v --level 3 IMAGE OUT.svgz     # one picture; levels 3/4/5 = ~300/600/1000 regions
 ```
 
-`BUILTIN` and `PBN` are found beside the program in a checkout
-(`pictures/`, `pbn.py`), else under the install prefix
-(`PREFIX/share/haltia-paint/`, `PREFIX/lib/haltia-paint/pbn.py`).
+`BUILTIN`, `PBN` and the `haltia_paint` package are found beside the program
+in a checkout (`pictures/`, `pbn.py`, `haltia_paint/`), else under the install
+prefix (`PREFIX/share/haltia-paint/`, `PREFIX/lib/haltia-paint/pbn.py` and
+`.../haltia_paint/`).
 
 The tablet (Lenovo B8000-H) is armv7, 1 GB RAM: `pbn.py` takes ~15 s for 300
 regions and ~20 s for 600 there, a full-screen redraw ~0.75 s. Commons
@@ -58,8 +60,15 @@ answers 429 when downloading many files; `make-paintings.py` retries.
 
 ## Layout
 
-- `haltia-paint` — the whole program, one Python file (no `.py` extension).
-  Module docstring describes the behaviour in detail; keep it in sync.
+- `haltia-paint` — the program (no `.py` extension): GTK pages, board,
+  gallery. Module docstring describes the behaviour in detail; keep it in
+  sync. What needs no screen moves into the `haltia_paint/` package, one
+  deep module at a time, each tested in `tests/` (see `CONTEXT.md` for the
+  names):
+  - `haltia_paint/convert.py` — Преобразование: the one queue of `pbn.py`
+    runs (one process at a time, urgent before background, background
+    stopped and started again for urgent work, cancel, timeout, progress
+    from `pbn.py --progress`). `tests/fake_pbn.py` stands in for pbn.py.
 - `pbn.py` — the region generator (raster to paint-by-number SVG), used by
   `make-paintings.py` as a module and by the program as a subprocess.
 - `make-paintings.py` — offline generator for `pictures/*.svgz`. `PAINTINGS`
@@ -81,8 +90,8 @@ answers 429 when downloading many files; `make-paintings.py` retries.
 
 ## Architecture notes
 
-- **Levels** are numeric codes in the SVG and gallery sections (`LEVELS` in
-  `haltia-paint`); 3/4/5 = at most 300/600/1000 regions with 18/24/28
+- **Levels** are numeric codes in the SVG and gallery sections (`SECTIONS` in
+  `haltia-paint`); 2 = ~120 regions (some built-ins); 3/4/5 = at most 300/600/1000 regions with 18/24/28
   colours (`LEVELS` in `pbn.py`, `GRADES` in `haltia-paint` must agree);
   built-ins use 3 and 4, 5 only for downloads; 8 = downloaded from
   Wikidata; 9 = user photos.
@@ -92,27 +101,33 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   thinness by distance transform only when sizes are right), then borders
   traced once per region pair on pixel corners so neighbours share them
   exactly, smoothed and simplified. Coordinates: 1000 units on the long side.
-- **Rendering** (`Board`): the board is a DrawingArea of `scale * size`
-  inside a ScrolledWindow; it is drawn in `TILE` px tiles cached until the
-  zoom changes. A tap invalidates only the tiles under the region's box;
-  the chosen colour's blue highlight is drawn over the tiles on every
-  draw, so changing colour costs no tiles. Hit test: a `GRID` of region
+- **Rendering** (`Board`): the board pans and zooms itself (a
+  ScrolledWindow cost a third of the frames); it is drawn in `TILE` px
+  tiles, in a thread of its own, cached until the zoom changes. A tap
+  paints its region into the tiles kept; the chosen colour's highlight is
+  part of the tiles, so changing colour repaints the regions of the old
+  and new colour in the tiles in view. Hit test: a `GRID` of region
   boxes, then `cairo.in_fill`; a miss falls back to the nearest unpainted
   region of the chosen colour within `FINGER` px via `in_stroke`.
 - **Picture ids** prefix the source: `builtin-<slug>`, `photo-<hash>`,
   `wd-<QID>-<level>`. Progress lives in
   `~/.local/share/haltia-paint/progress/<id>.json` as `{"count", "filled": [region
   indexes]}`; a count mismatch resets it. `last` stores the last opened id.
-- **Photos and downloads** are converted by running `pbn.py` in a niced
-  subprocess (keeps the GTK thread and the GIL free); photos cache to
-  `~/.local/share/haltia-paint/photos/`, search previews to `.../work/`.
+- **Photos and downloads** are converted through `Conversion`
+  (`haltia_paint/convert.py`): `pbn.py` in a niced subprocess, one at a
+  time (1 GB of RAM); a preview is urgent and stops a photo, which starts
+  again after it; leaving the preview cancels its sizes. Photos cache to
+  `~/.local/share/haltia-paint/photos/` (a photo that failed gets
+  `<key>.failed` and is tried again only from its «Ещё раз» button),
+  search previews to `.../work/`.
 - Regions are parsed lazily (`regions_of`); gallery thumbnails render on
   first draw and are cached as PNG; progress is written shortly after the
   last tap.
 - **Network** (search, "+ Найти"): only https to wikidata.org,
   commons.wikimedia.org and the Wikimedia image hosts (`IMAGE_HOSTS`), with
-  `AGENT` as User-Agent. Work runs in background threads / a
-  `ThreadPoolExecutor`; results return to GTK via `GLib.idle_add`, with a
+  `AGENT` as User-Agent. Work runs in background threads / `Workers` (a
+  few threads; concurrent.futures took a third of a second to import);
+  results return to GTK via `GLib.idle_add`, with a
   generation counter (`search_gen`) to drop stale results.
 
 ## Conventions

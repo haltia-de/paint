@@ -1,6 +1,6 @@
 # Maintainer: Mikhail Nevskiy <rensomail@gmail.com>
 pkgname=haltia-paint
-pkgver=4.1.4
+pkgver=4.2.0
 pkgrel=0
 pkgdesc="Раскраска: Colour by number on paintings and prints (GTK 3)"
 url="https://github.com/haltia-de/paint"
@@ -14,7 +14,8 @@ source="$pkgname-$pkgver.tar.gz::https://github.com/haltia-de/paint/archive/v$pk
 builddir="$srcdir/paint-$pkgver"
 
 check() {
-	python3 -m py_compile haltia-paint pbn.py
+	python3 -m py_compile haltia-paint pbn.py haltia_paint/*.py
+	python3 -m unittest discover -s tests
 }
 
 package() {

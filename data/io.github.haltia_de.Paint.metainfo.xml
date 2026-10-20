@@ -19,6 +19,12 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
+    <release version="4.2.0" date="2026-10-20">
+      <description>
+        <p>Pictures are made one at a time, so the tablet no longer runs out of memory. The picture being previewed comes first and shows a bar of how far it is; leaving the preview stops its work. A photo that cannot be made says so and has an "Ещё раз" button.</p>
+        <p xml:lang="ru">Раскраски готовятся по одной, и планшету больше не тесно в памяти. Картина в предпросмотре готовится первой, а полоска показывает, сколько осталось; если уйти из предпросмотра, работа останавливается. Если из фотографии не получилась раскраска, об этом написано, и есть кнопка «Ещё раз».</p>
+      </description>
+    </release>
     <release version="4.1.4" date="2026-10-19">
       <description>
         <p>When searching for new paintings, the window makes room for the on-screen keyboard instead of covering it.</p>

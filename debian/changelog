@@ -1,3 +1,11 @@
+haltia-paint (4.2.0) unstable; urgency=medium
+
+  * Pictures are made one at a time; the preview comes first, with a bar
+    of how far it is, and leaving it stops its work. A photo that cannot
+    be made says so and has an "Ещё раз" button.
+
+ -- Haltia <rensomail@gmail.com>  Tue, 20 Oct 2026 11:10:00 +0300
+
 haltia-paint (4.1.4) unstable; urgency=medium
 
   * When searching for new paintings, the window makes room for the
