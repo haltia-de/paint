@@ -173,10 +173,13 @@ answers 429 when downloading many files; `make-paintings.py` retries.
 - Commit messages: `haltia-paint: <short sentence>.` style (`b8k-paint:` before 4.0).
 - Files carry `SPDX-License-Identifier: GPL-2.0`; LF line endings
   (`.gitattributes`).
-- Every `<release>` in the metainfo carries a short `<description>` saying
-  what the person will notice: since 4.1.3 in English with a Russian
-  `xml:lang="ru"` twin (before, Russian only); haltia-update shows it as
-  «Что нового» before installing. `debian/changelog` gets each version too
+- What each release brings is written in `NEWS.md`, in Russian and English
+  (`## X.Y.Z (YYYY-MM-DD)`, `### Русский`, `### English`; what the person
+  will notice), before the tag; `python3 <haltia-de/ci>/news.py metainfo
+  NEWS.md data/io.github.haltia_de.Paint.metainfo.xml` writes the
+  metainfo's `<releases>` from it, and the release's CI checks they agree
+  (`--check`). haltia-update shows the Russian as «Что нового» before
+  installing. `debian/changelog` gets each version too
   (CI checks it equals the tag).
 - Inside the Haltia shell (`ON_HALTIA`, from `XDG_CURRENT_DESKTOP`) the
   header has no close button, the shell's ✕ covers it; elsewhere it shows
