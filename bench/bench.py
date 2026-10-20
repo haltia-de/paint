@@ -4,7 +4,7 @@
 with numbers that say how near each comes to Happy Color, and a page to
 see them side by side.
 
-  python3 bench/bench.py CACHE OUT [--variants A,B,C,D] [--only SLUG,...] [--fetch]
+  python3 bench/bench.py CACHE OUT [--variants A,B,E,F] [--only SLUG,...] [--fetch]
 
 CACHE holds the images that bench/images.txt lists (--fetch gets the
 missing ones from Wikimedia Commons); OUT gets index.html and pictures.
@@ -17,6 +17,14 @@ Variants (B, C and D are experiments; what wins moves into pbn.py):
      goes on until the count is near the level's; numbers in the middle.
   C  as B, the smoothing by OpenCV's mean shift.
   D  OpenCV SLIC superpixels, coloured by k-means, then as B.
+  E  as B, but neighbours of one colour join in every round of merging
+     (pbn.merge joins them at the end and falls short of the count), so
+     no merging again.
+  F  as E, and no region thinner than MIN_RADIUS_F, for numbers that can
+     be read without zooming far in.
+The default is A,B,E,F (C and D lost the first comparison: OpenCV's mean
+shift was little better than B for some 90 MB on the tablet, and SLIC
+made a honeycomb across the shapes).
 
 Numbers (per image and on average):
   regions     how many, against the level's target
@@ -253,6 +261,99 @@ def merge_alike(labels, colour_of, palette_lab, strength, regions, min_area, min
         colour_of = colour_of[roots]
 
 
+def border_pairs(labels, strength):
+    """Every pair of 4-neighbour pixels in different regions: (a, b, edge
+    strength there)."""
+    a = np.concatenate((labels[:, :-1].ravel(), labels[:-1, :].ravel()))
+    b = np.concatenate((labels[:, 1:].ravel(), labels[1:, :].ravel()))
+    g = np.concatenate((np.maximum(strength[:, :-1], strength[:, 1:]).ravel(),
+                        np.maximum(strength[:-1, :], strength[1:, :]).ravel()))
+    diff = a != b
+    return a[diff], b[diff], g[diff]
+
+
+def choose(a, b, g, n, small, colour_lab, alike):
+    """For each small region the neighbour to join (-1 for none): the
+    longest border, or (alike) long border, alike colour, weak edge."""
+    src, dst, g = np.concatenate((a, b)), np.concatenate((b, a)), np.concatenate((g, g))
+    want = small[src]
+    keys, inv, counts = np.unique(src[want].astype(np.int64) * n + dst[want],
+                                  return_inverse=True, return_counts=True)
+    src, dst = keys // n, keys % n
+    score = counts.astype(float)
+    if alike:
+        edge = np.bincount(inv, g[want], len(keys)) / counts
+        de = np.linalg.norm(colour_lab[src] - colour_lab[dst], axis=1)
+        score *= np.exp(-de / 12) * (1 - 0.8 * edge)
+    order = np.lexsort((-score, src))
+    src, dst = src[order], dst[order]
+    first = np.ones(len(src), bool)
+    first[1:] = src[1:] != src[:-1]
+    best = np.full(n, -1, np.int64)
+    best[src[first]] = dst[first]
+    return best
+
+
+def roots_of(parent):
+    """Pointer jumping until every region points at its root."""
+    for _ in range(64):
+        nxt = parent[parent]
+        if (nxt == parent).all():
+            break
+        parent = nxt
+    return parent
+
+
+def merge_fused(labels, colour_of, palette_lab, strength, regions, min_area, min_radius,
+                alike=True):
+    """pbn.merge, but neighbours that become one colour join in every
+    round, so the count it aims at is the count it ends with (pbn.merge
+    joins them only at the end, and falls short)."""
+    thin_rounds = 0
+    while True:
+        n = len(colour_of)
+        area = np.bincount(labels.ravel(), minlength=n)
+        small = area < min_area
+        if n > regions:
+            small[np.argsort(area)[:max(1, (n - regions) // 4)]] = True
+        if not small.any():
+            small = pbn.radii(labels, pbn.inner_distance(labels), n) < min_radius
+            if not small.any() or thin_rounds == 4:
+                return labels, colour_of
+            thin_rounds += 1
+        a, b, g = border_pairs(labels, strength)
+        best = choose(a, b, g, n, small, palette_lab[colour_of], alike)
+        parent = np.arange(n)
+        go = small & (best >= 0)
+        parent[go] = best[go]
+        ids = np.arange(n)
+        for _ in range(64):
+            nxt = parent[parent]
+            loop = (nxt == ids) & (parent != ids)
+            loop &= (area > area[parent]) | ((area == area[parent]) & (ids > parent))
+            parent[loop] = ids[loop]
+            nxt = parent[parent]
+            if (nxt == parent).all():
+                break
+            parent = nxt
+        # Then neighbours now of one colour become one region.
+        a, b = parent[a], parent[b]
+        same = (a != b) & (colour_of[a] == colour_of[b])
+        a, b = a[same], b[same]
+        for _ in range(64):
+            if not len(a):
+                break
+            low = np.minimum(parent[a], parent[b])
+            np.minimum.at(parent, parent[a], low)
+            np.minimum.at(parent, parent[b], low)
+            parent = roots_of(parent)
+            if (parent[a] == parent[b]).all():
+                break
+        roots, new = np.unique(parent, return_inverse=True)
+        labels = new[labels].astype(np.int32)
+        colour_of = colour_of[roots]
+
+
 def label_points(labels, n, middle):
     """Where each number goes: (rows, cols, radius). middle: among the
     widest pixels the one nearest the region's centre, else pbn's first."""
@@ -293,8 +394,8 @@ def run(variant, img, level):
     if variant == "A":
         idx, n_col = pbn.reduce(img, pbn.SIDE, colours, detail)
         n_col = len(n_col)
-    elif variant in ("B", "C"):
-        smooth = guided(rgb) if variant == "B" else mean_shift(rgb)
+    elif variant in ("B", "C", "E", "F"):
+        smooth = mean_shift(rgb) if variant == "C" else guided(rgb)
         idx, n_col = quantise(smooth, colours, detail)
     else:
         idx, n_col = superpixels(rgb, regions, colours)
@@ -306,6 +407,11 @@ def run(variant, img, level):
     min_area = w * h / regions / 30
     if variant == "A":
         labels, colour_of = pbn.merge(labels, colour_of, regions, min_area, 2.5)
+    elif variant in ("E", "F"):
+        strength = edges(rgb)
+        palette_lab = pbn.lab(np.clip(palette + 0.5, 0, 255).astype(np.uint8))
+        labels, colour_of = merge_fused(labels, colour_of, palette_lab, strength, regions,
+                                        min_area, 2.5 if variant == "E" else MIN_RADIUS_F)
     else:
         strength = edges(rgb)
         palette_lab = pbn.lab(np.clip(palette + 0.5, 0, 255).astype(np.uint8))
@@ -398,7 +504,11 @@ def draw(res, out_painted, out_player):
     img.save(out_player, quality=88)
 
 
+# Variant F: no region thinner than this (picture units), so that its
+# number can be read without zooming far in.
+MIN_RADIUS_F = 3.5
 NAMES = {"A": "A · как сейчас", "B": "B · numpy: края и цвет",
+         "E": "E · B, слияние по ходу", "F": "F · E, номера крупнее",
          "C": "C · OpenCV mean shift", "D": "D · OpenCV SLIC"}
 COLUMNS = [("regions", "области", "%d"), ("colours", "цвета", "%d"), ("rare", "редкие", "%d"),
            ("de_min", "ΔE min", "%.1f"), ("likeness", "сходство ΔE↓", "%.1f"),
@@ -475,7 +585,7 @@ def main():
     args = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     args.add_argument("cache")
     args.add_argument("out")
-    args.add_argument("--variants", default="A,B,C,D")
+    args.add_argument("--variants", default="A,B,E,F")
     args.add_argument("--only", default="")
     args.add_argument("--fetch", action="store_true")
     opts = args.parse_args()
