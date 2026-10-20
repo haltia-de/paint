@@ -10,7 +10,7 @@ license="GPL-2.0-only"
 provides="b8k-paint=$pkgver-r$pkgrel"
 replaces="b8k-paint"
 depends="python3 py3-gobject3 gtk+3.0 py3-haltia-kit py3-cairo py3-pillow py3-numpy py3-scipy"
-checkdepends="py3-numpy py3-scipy py3-pillow"
+checkdepends="py3-numpy py3-scipy py3-pillow py3-cairo"
 source="$pkgname-$pkgver.tar.gz::https://github.com/haltia-de/paint/archive/v$pkgver.tar.gz"
 builddir="$srcdir/paint-$pkgver"
 

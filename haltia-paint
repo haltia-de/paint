@@ -39,7 +39,10 @@ stay quick on a slow tablet (no GPU: a full redraw takes a second), the
 picture is drawn in tiles at the current zoom by a thread of its own and
 kept until the zoom changes; a drag only copies tiles, a zoom stretches
 what is there until the new tiles come, a tap paints its region into the
-tiles kept. A picture's own outlines (pbn.py --ink) are drawn black over
+tiles kept. The chosen number's regions are striped grey, or as chosen in
+Настройки (⚙ in the gallery header: stripes, a checker or a fill, grey,
+blue, yellow or the number's colour; haltia_paint.highlight), as a plain
+colour got lost next to painted ones. A picture's own outlines (pbn.py --ink) are drawn black over
 the regions and are not painted. Progress is written a moment after the
 last tap with the picture's fingerprint (data-sig), so a picture made
 again starts again rather than taking another's progress; gallery
@@ -118,6 +121,7 @@ gi.require_version("Gdk", "3.0")
 gi.require_version("GLibUnix", "2.0")
 gi.require_version("GdkPixbuf", "2.0")
 from haltia_kit import dialogs, paths  # noqa: E402
+from haltia_kit.settings import Settings  # noqa: E402
 from gi.repository import Gdk, GdkPixbuf, Gio, GLibUnix, Gtk, Pango  # noqa: E402
 
 # Installed as PREFIX/bin/haltia-paint: the pictures are in
@@ -150,6 +154,7 @@ PBN = next((p for p in (os.path.join(HERE, "pbn.py"),
 sys.path.insert(0, HERE if os.path.isdir(os.path.join(HERE, "haltia_paint"))
                 else os.path.join(PREFIX, "lib", "haltia-paint"))
 from haltia_paint.convert import Conversion  # noqa: E402
+from haltia_paint.highlight import COLOURS, STYLES, Highlight  # noqa: E402
 # Gallery sections, easier further up: a level, or a theme that has a
 # section of its own (its pictures then show there, whatever the level).
 SECTIONS = (
@@ -210,7 +215,6 @@ TOPICS = ("Шишкин", "Айвазовский", "Левитан", "Куин�
           "зима", "река", "натюрморт", "кошка", "собака", "лошадь", "птицы", "корабль")
 
 # The chosen number's regions: light accent blue, the same for every colour.
-MARK = (0.66, 0.80, 0.97)
 # A picture's own outlines (pbn.py --ink), black.
 INK = (34 / 255, 30 / 255, 28 / 255)
 
@@ -771,8 +775,9 @@ _NUMBER_AT = {}
 
 def draw_regions(cr, pic, scale, regions, fill, outline=None, number=None):
     """Draw these regions (indexes) of a picture at scale: fill(i) gives a
-    region's colour (no fill when None), outline(i) whether it gets a grey
-    outline, number(i) None or (colour, bold) for its number."""
+    region's colour or a highlight's Mark (no fill when None), outline(i)
+    whether it gets a grey outline, number(i) None or (colour, bold) or
+    (colour, bold, halo) for its number."""
     regs = regions_of(pic)
     cr.save()
     cr.scale(scale, scale)
@@ -782,7 +787,11 @@ def draw_regions(cr, pic, scale, regions, fill, outline=None, number=None):
     cr.set_line_width(1.2 / scale)
     for i in regions if fill else ():
         cr.append_path(regs[i].path)
-        cr.set_source_rgb(*fill(i))
+        look = fill(i)
+        if hasattr(look, "source"):  # a highlight's pattern (haltia_paint.highlight)
+            cr.set_source(look.source(scale))
+        else:
+            cr.set_source_rgb(*look)
         cr.fill_preserve()
         cr.stroke()
     if outline:
@@ -828,8 +837,17 @@ def draw_regions(cr, pic, scale, regions, fill, outline=None, number=None):
                 at = _NUMBER_AT[size, bold, text] = (-ext.width / 2 - ext.x_bearing,
                                                      -ext.height / 2 - ext.y_bearing)
             cr.move_to(reg.x * scale + at[0], reg.y * scale + at[1])
-            cr.set_source_rgb(*style[0])
-            cr.show_text(text)
+            if len(style) > 2:
+                # A halo, so the number reads over a highlight's pattern.
+                cr.text_path(text)
+                cr.set_source_rgb(*style[2])
+                cr.set_line_width(max(2.0, size * 0.18))
+                cr.stroke_preserve()
+                cr.set_source_rgb(*style[0])
+                cr.fill()
+            else:
+                cr.set_source_rgb(*style[0])
+                cr.show_text(text)
 
 
 def whole_picture(pic, width, height, fill, outline=None):
@@ -1306,20 +1324,24 @@ class Board(Gtk.DrawingArea):
     def looks(self, filled, chosen):
         """How regions look with these painted and this number chosen:
         (fill, outline, number) for draw_regions. Still to paint: grey,
-        outlined, a grey number; those of the chosen number light blue with
-        a bold dark one."""
+        outlined, a grey number; those of the chosen number in the
+        highlight of Настройки (stripes at first) with a bold dark number
+        in a white halo."""
         regs = self.regions
+        look = self.app.highlight
+        mark = look.mark(self.full[chosen]) if chosen is not None else None
+        text, halo = look.number
 
         def fill(i):
             n = regs[i].n
             if i in filled:
                 return self.full[n]
-            return MARK if n == chosen else self.grey[n]
+            return mark if n == chosen else self.grey[n]
 
         def number(i):
             if i in filled:
                 return None
-            return ((0.1, 0.12, 0.14), True) if regs[i].n == chosen else ((0.42, 0.42, 0.45), False)
+            return (text, True, halo) if regs[i].n == chosen else ((0.42, 0.42, 0.45), False)
 
         return fill, lambda i: i not in filled, number
 
@@ -1761,6 +1783,11 @@ class Paint:
         self.find_button.connect("clicked", lambda _b: self.add_picture())
         self.find_button.set_no_show_all(True)
         header.pack_end(self.find_button)
+        self.settings_button = Gtk.Button(label="⚙")
+        self.settings_button.get_style_context().add_class("back")
+        self.settings_button.connect("clicked", lambda _b: self.show_settings())
+        self.settings_button.set_no_show_all(True)
+        header.pack_end(self.settings_button)
         # The shell closes a program with its own ✕; elsewhere the window
         # has the desktop's buttons (its decoration-layout).
         header.set_show_close_button(not ON_HALTIA)
@@ -1779,6 +1806,10 @@ class Paint:
         self.search_page = None
         self.search_gen = 0
         self.preview_item = None
+        # Настройки: how the chosen number's regions stand out.
+        self.settings = Settings("paint")
+        self.highlight = Highlight(self.settings.get("highlight", None),
+                                   self.settings.get("highlight-colour", None))
         # The kind of picture a preview makes, kept from one to the next.
         self.big_numbers, self.ink = True, 0
         self.pool = Workers(3)
@@ -1815,6 +1846,7 @@ class Paint:
         self.title.set_text("Раскраски")
         self.back_button.hide()
         self.find_button.show()
+        self.settings_button.show()
         if self.gallery and not rebuild:
             if changed in self.cards:
                 self.fill_card(*self.cards[changed])
@@ -2092,6 +2124,7 @@ class Paint:
         self.title.set_text("Из галереи")
         self.back_button.show()
         self.find_button.hide()
+        self.settings_button.hide()
         if self.stack.get_child_by_name("photos") is None:
             from haltia_kit import photos  # its thumbnails: only now
             self.photo_thumbs = photos.Thumbs()
@@ -2204,6 +2237,7 @@ class Paint:
         self.title.set_text("Новые картины")
         self.back_button.show()
         self.find_button.hide()
+        self.settings_button.hide()
         self.stack.set_visible_child_name("search")
         # No focus in the entry: the keyboard would cover the topics.
         self.win.set_focus(None)
@@ -2647,6 +2681,7 @@ class Paint:
         self.title.set_text(pic["name"])
         self.back_button.show()
         self.find_button.hide()
+        self.settings_button.hide()
         old = self.stack.get_child_by_name("board")
         if old:
             self.stack.remove(old)
@@ -2890,7 +2925,92 @@ class Paint:
 
         threading.Thread(target=work, daemon=True).start()
 
+    # settings
+    def show_settings(self):
+        """Настройки: how the chosen number's regions stand out, a pattern
+        and its colour, each shown as it looks."""
+        self.title.set_text("Настройки")
+        self.back_button.show()
+        self.find_button.hide()
+        self.settings_button.hide()
+        old = self.stack.get_child_by_name("settings")
+        if old:
+            self.stack.remove(old)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        for side in ("start", "end", "top"):
+            getattr(box, "set_margin_" + side)(24)
+        self.look_buttons = []
+        for heading, key, choices in (("Где красить выбранным цветом:", "style", STYLES),
+                                      ("Цвет подсветки:", "colour", COLOURS)):
+            label = Gtk.Label(label=heading, xalign=0)
+            label.get_style_context().add_class("pinfo")
+            box.pack_start(label, False, False, 0)
+            row = Gtk.Box(spacing=14, homogeneous=True)
+            for value, name in choices:
+                inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                sample = Gtk.DrawingArea()
+                sample.set_size_request(150, 90)
+                sample.connect("draw", self.draw_look, key, value)
+                inner.pack_start(sample, False, False, 0)
+                inner.pack_start(Gtk.Label(label=name), False, False, 0)
+                b = Gtk.Button()
+                b.add(inner)
+                b.get_style_context().add_class("grade")
+                b.connect("clicked", lambda _b, k=key, v=value: self.choose_look(k, v))
+                row.pack_start(b, True, True, 0)
+                self.look_buttons.append((b, key, value, sample))
+            box.pack_start(row, False, False, 0)
+        box.show_all()
+        self.stack.add_named(box, "settings")
+        self.stack.set_visible_child_name("settings")
+        self.choose_look(None, None)
+
+    def draw_look(self, widget, cr, key, value):
+        """A sample of a choice: a patch of it with a number on it, as the
+        board will show it (the other choice as it is now)."""
+        look = Highlight(value if key == "style" else self.highlight.style,
+                         value if key == "colour" else self.highlight.colour)
+        w, h = widget.get_allocated_width(), widget.get_allocated_height()
+        cr.set_source_rgb(0.9, 0.9, 0.89)
+        cr.paint()
+        cr.rectangle(8, 8, w - 16, h - 16)
+        cr.set_source(look.mark((0.59, 0.64, 0.54)).source(1.0))
+        cr.fill_preserve()
+        cr.set_source_rgb(0.55, 0.55, 0.58)
+        cr.set_line_width(1)
+        cr.stroke()
+        text, halo = look.number
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(34)
+        ext = cr.text_extents("6")
+        cr.move_to(w / 2 - ext.width / 2 - ext.x_bearing, h / 2 - ext.height / 2 - ext.y_bearing)
+        cr.text_path("6")
+        cr.set_source_rgb(*halo)
+        cr.set_line_width(6)
+        cr.stroke_preserve()
+        cr.set_source_rgb(*text)
+        cr.fill()
+        return False
+
+    def choose_look(self, key, value):
+        """A choice tapped (None: just show which are chosen), kept in the
+        settings at once."""
+        if key == "style":
+            self.settings.set("highlight", value)
+        elif key == "colour":
+            self.settings.set("highlight-colour", value)
+        if key:
+            self.highlight = Highlight(value if key == "style" else self.highlight.style,
+                                       value if key == "colour" else self.highlight.colour)
+        for b, k, v, sample in self.look_buttons:
+            on = v == (self.highlight.style if k == "style" else self.highlight.colour)
+            (b.get_style_context().add_class if on else b.get_style_context().remove_class)("on")
+            sample.queue_draw()
+
     def back(self):
+        if self.stack.get_visible_child_name() == "settings":
+            self.show_gallery()
+            return
         if self.stack.get_visible_child_name() == "preview":
             if self.preview_item and self.preview_item.get("own"):
                 self.show_photos()

@@ -21,8 +21,8 @@
   <releases>
     <release version="4.3.0" date="2026-10-20">
       <description>
-        <p>Pictures are made anew: their regions follow the shapes of the painting and are cleaner, the numbers stand in the middle of a region and are large enough to read without zooming far in, and prints and drawings keep their own black outlines. When adding a picture you choose «Крупные номера» and how many outlines to keep: none, few or more. The built-in pictures already begun start again, as their regions are new.</p>
-        <p xml:lang="ru">Раскраски сделаны заново: области идут по формам картины и стали чище, номера стоят в середине области и крупные, их видно без сильного увеличения, а у гравюр и рисунков сохранены их чёрные контуры. При добавлении картины можно выбрать «Крупные номера» и сколько оставить контуров: нет, мало или много. Начатые встроенные картины начнутся заново, потому что области у них новые.</p>
+        <p>Pictures are made anew: their regions follow the shapes of the painting and are cleaner, the numbers stand in the middle of a region and are large enough to read without zooming far in, and prints and drawings keep their own black outlines. When adding a picture you choose «Крупные номера» and how many outlines to keep: none, few or more. The regions of the chosen colour are striped, so they show next to any painted ones; the pattern and its colour can be changed in Настройки (⚙ in the gallery). The built-in pictures already begun start again, as their regions are new.</p>
+        <p xml:lang="ru">Раскраски сделаны заново: области идут по формам картины и стали чище, номера стоят в середине области и крупные, их видно без сильного увеличения, а у гравюр и рисунков сохранены их чёрные контуры. При добавлении картины можно выбрать «Крупные номера» и сколько оставить контуров: нет, мало или много. Области выбранного цвета заштрихованы, их видно рядом с любыми закрашенными; узор и цвет подсветки можно поменять в «Настройках» (⚙ в галерее). Начатые встроенные картины начнутся заново, потому что области у них новые.</p>
       </description>
     </release>
     <release version="4.2.0" date="2026-10-20">
