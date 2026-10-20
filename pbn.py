@@ -133,22 +133,29 @@ def edges(rgb):
     return (g / (np.percentile(g, 99) + 1e-6)).clip(0, 1)
 
 
-def ink_lines(rgb, width=7, contrast=12, dark=45, least=20):
+def ink_lines(rgb, width=7, contrast=12, dark=45, least=20, ground=50):
     """The picture's own outlines, as on a print or a drawing: lines
     darker than what is round them by contrast (Lab lightness), darker
-    than dark and thinner than width pixels (a black-hat), so broad dark
-    areas are not lines. Fainter stretches (half the contrast, a little
-    lighter) count where they carry on such a line, so lines do not break
-    up; specks under least pixels are dropped."""
+    than dark, on a ground lighter than ground (dark textures, such as
+    water, leaves or feathers, are dark round about too) and thinner than
+    width pixels (a black-hat). Fainter stretches (half the contrast, a
+    little lighter) count where they carry on such a line, so lines do not
+    break up; whatever is broader than a line, with what is round it, is
+    not one; specks under least pixels are dropped. (Before this, whole
+    dark parts of some prints went black.)"""
     light = lightness(rgb)
-    hat = ndimage.grey_closing(light, size=width) - light
-    strong = (hat > contrast) & (light < dark)
-    weak = (hat > contrast / 2) & (light < dark + 15)
-    weak = ndimage.binary_closing(weak | strong, np.ones((3, 3), bool))
-    parts, n = ndimage.label(weak, np.ones((3, 3), bool))
+    closed = ndimage.grey_closing(light, size=width)
+    hat = closed - light
+    on_light = closed > ground
+    strong = (hat > contrast) & (light < dark) & on_light
+    lines = (hat > contrast / 2) & (light < dark + 15) & on_light
+    lines = ndimage.binary_closing(lines | strong, np.ones((3, 3), bool))
+    broad = ndimage.distance_transform_edt(lines) > width / 2
+    lines &= ~ndimage.binary_dilation(broad, iterations=width // 2 + 1)
+    parts, n = ndimage.label(lines, np.ones((3, 3), bool))
     if not n:
-        return strong
-    has_strong = np.bincount(parts[strong], minlength=n + 1) > 0
+        return lines
+    has_strong = np.bincount(parts[strong & lines], minlength=n + 1) > 0
     size = np.bincount(parts.ravel(), minlength=n + 1)
     keep = has_strong & (size >= least)
     keep[0] = False
