@@ -1,3 +1,12 @@
+haltia-paint (4.7.0) unstable; urgency=medium
+
+  * Настройки while painting; Продолжить and Готовые in colour beside the
+    order; «Наверх»; how forgiving a tap is in Настройки; denser stripes
+    and an inverted highlight; a softer colour chime; a quiet sound for
+    a miss.
+
+ -- Haltia <rensomail@gmail.com>  Tue, 20 Oct 2026 19:30:00 +0300
+
 haltia-paint (4.6.0) unstable; urgency=medium
 
   * Rings round the last regions of a colour; «где?» goes on to the next,

@@ -14,7 +14,8 @@ bottom has one big button per number. Pick a colour, tap its regions.
   the picture is. With three regions or fewer of the chosen colour left,
   each gets a blue ring, seen at any zoom.
 - A tap a little beside a region of the chosen number still paints it:
-  a finger is wider than the smallest regions.
+  a finger is wider than the smallest regions (how far beside, or only
+  right on it, is a choice of Настройки).
 - Numbers show once they are large enough to read; small regions show
   theirs when zoomed in.
 - The buttons on the right carry drawn icons, no words, the most used on
@@ -35,8 +36,9 @@ bottom has one big button per number. Pick a colour, tap its regions.
   first): a finger that does not move taps, unless another one was on
   the screen just then; one lying still for a while (a thumb holding
   the tablet, or one whose lift was lost after a palm) is left out.
-- A wrong tap gets a red outline for a second; there is no timer, no
-  score, no ads.
+- A wrong tap gets a red outline for a second and a quiet low sound (no
+  buzz of the program's own: the shell buzzes every tap alike); there is
+  no timer, no score, no ads.
 - Progress is saved after every tap, so a picture can wait for tomorrow;
   the program starts on the last picture, unless it is finished.
 - At a picture's end: a short tune and a longer buzz, the picture painted
@@ -53,12 +55,13 @@ number and the point where the number goes. The gallery (Раскраски)
 shows them in sections (haltia_paint.sections), by theme or by
 difficulty as chosen above it, with a button per section that scrolls
 to it: first Продолжить, the pictures begun, last Готовые, the finished
-ones. To stay quick on a slow tablet (no GPU: a full redraw takes 0.75 s), the
+ones (both in colour, their buttons beside the order's); «Наверх» comes
+over the cards once they are scrolled down. To stay quick on a slow tablet (no GPU: a full redraw takes 0.75 s), the
 picture is drawn in tiles at the current zoom by a thread of its own and
 kept until the zoom changes; a drag only copies tiles, a zoom stretches
 what is there until the new tiles come, a tap paints its region into the
 tiles kept. The chosen number's regions are striped grey, or as chosen in
-Настройки (⚙ in the gallery header: stripes, a checker or a fill, in
+Настройки (⚙ in the header of the gallery and of a picture: stripes, a checker or a fill, in
 grey or a bright colour; haltia_paint.highlight), as a plain
 colour got lost next to painted ones. A picture's own outlines (pbn.py --ink) are drawn black over
 the regions and are not painted. Progress is written a moment after the
@@ -193,8 +196,10 @@ MAX_ZOOM = 14
 # NUMBER_MAX px.
 NUMBER_MIN = 16
 NUMBER_MAX = 30
-# A tap this far (screen px) beside a region of the chosen number paints it;
-# a finger that moved further than TAP_SLOP drags rather than taps.
+# A tap this far (screen px) beside a region of the chosen number paints it
+# (Настройки: how forgiving a tap is; 0: only right on it); a finger that
+# moved further than TAP_SLOP drags rather than taps.
+FINGERS = ((0, "Только точно"), (20, "Немного"), (40, "Средне"), (70, "Сильно"))
 FINGER = 40
 TAP_SLOP = 12
 # A finger that sent nothing for LIVE s lies still (a thumb holding the
@@ -288,6 +293,23 @@ button.reset {
 .haltia-dialog button.danger label { color: #ffffff; text-shadow: none; }
 .card label.done { font-size: 24px; font-weight: bold; color: #1a7f45; }
 label.end { font-size: 40px; font-weight: bold; color: #1a7f45; }
+/* Continue and finished: their headings and buttons. */
+label.section.continue { color: #1c5fb8; }
+label.section.finished { color: #1a7f45; }
+button.topic.continue { background-color: #3584e4; border-color: #1c71d8; }
+button.topic.finished { background-color: #26a269; border-color: #1a7f45; }
+button.topic.continue label, button.topic.finished label { color: #ffffff; }
+button.up {
+  font-size: 26px;
+  min-height: 72px;
+  padding: 0 28px;
+  border-radius: 36px;
+  background-image: none;
+  background-color: #3584e4;
+  border: 1px solid #1c71d8;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+button.up label { color: #ffffff; }
 label.section {
   font-size: 28px;
   font-weight: bold;
@@ -1820,13 +1842,15 @@ class Board(Gtk.DrawingArea):
         i = self.hit(x, y)
         if i is None or i in self.filled or self.regions[i].n != self.chosen:
             # A finger beside a small region of the chosen number.
-            near = self.near(x, y, FINGER / self.scale)
+            reach = self.app.finger
+            near = self.near(x, y, reach / self.scale) if reach else None
             if near is None:
                 if i is not None and i not in self.filled:
-                    # The red outline says "not this one".
+                    # The red outline and a quiet sound say "not this one".
                     self.wrong = i
                     self.redraw(i)
                     GLib.timeout_add(1000, self.clear_wrong, i)
+                    self.app.feedback.missed()
                 return
             i = near
         self.filled.add(i)
@@ -2033,19 +2057,23 @@ class Paint:
         # Настройки: how the chosen number's regions stand out.
         self.settings = Settings("paint")
         self.highlight = Highlight(self.settings.get("highlight", None),
-                                   self.settings.get("highlight-colour", None))
+                                   self.settings.get("highlight-colour", None),
+                                   self.settings.get_bool("highlight-invert", False))
         # A picture not begun shows in the gallery in its colours (or pale).
         self.colour_new = self.settings.get_bool("new-in-colour", True)
         # «где?»: shown or not, and how many times a picture (0: no limit).
         self.hint_shown = self.settings.get_bool("hint", True)
         self.hint_limit = self.int_setting("hint-limit", 0, HINT_LIMITS)
         self.hint_zoom = self.int_setting("hint-zoom", HINT_ZOOM, HINT_ZOOMS)
+        # How far beside a region of the chosen colour a tap still paints it.
+        self.finger = self.int_setting("finger", FINGER, FINGERS)
         # Rings round the last regions of the chosen colour.
         self.rings = self.settings.get_bool("rings", True)
         # A sound and a buzz when a colour or the picture is done; the
         # picture painted again before one's eyes at its end.
         self.feedback = Feedback(SOUNDS, APP_ID, self.settings.get_bool("sound", True),
-                                 self.settings.get_bool("vibration", True))
+                                 self.settings.get_bool("vibration", True),
+                                 self.settings.get_bool("miss-sound", True))
         self.replay = self.settings.get_bool("replay", True)
         # The kind of picture a preview makes, kept from one to the next.
         self.big_numbers, self.ink = True, 0
@@ -2129,6 +2157,7 @@ class Paint:
                 b.get_style_context().add_class("on")
             b.connect("clicked", lambda _b, o=order: self.order_gallery(o))
             orders.pack_start(b, False, False, 0)
+        orders.pack_start(Gtk.Box(), True, True, 0)  # Продолжить, Готовые to the right
         top.pack_start(orders, False, False, 0)
         jumps = Gtk.FlowBox()
         jumps.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -2162,6 +2191,9 @@ class Paint:
             content.pack_start(row, False, False, 0)
         scroll = Gtk.ScrolledWindow()
         todo = []
+        # Продолжить and Готовые stand out in colour, their buttons beside
+        # the order's, as they are there whatever the order.
+        marked = {sections.CONTINUE: "continue", sections.FINISHED: "finished"}
         for heading, cards in found:
             label = Gtk.Label(label=heading, xalign=0)
             label.get_style_context().add_class("section")
@@ -2169,7 +2201,12 @@ class Paint:
             jump = Gtk.Button(label=heading)
             jump.get_style_context().add_class("topic")
             jump.connect("clicked", lambda _b, w=label: self.scroll_to(scroll, content, w, 12))
-            jumps.add(jump)
+            if heading in marked:
+                label.get_style_context().add_class(marked[heading])
+                jump.get_style_context().add_class(marked[heading])
+                orders.pack_start(jump, False, False, 0)
+            else:
+                jumps.add(jump)
             flow = Gtk.FlowBox()
             flow.set_selection_mode(Gtk.SelectionMode.NONE)
             flow.set_homogeneous(True)
@@ -2187,7 +2224,22 @@ class Paint:
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_kinetic_scrolling(True)
         scroll.add(content)
-        box.pack_start(scroll, True, True, 0)
+        # «Наверх», over the cards once they are scrolled down, back to the
+        # order and the section buttons.
+        overlay = Gtk.Overlay()
+        overlay.add(scroll)
+        up = Gtk.Button(label="↑  Наверх")
+        up.get_style_context().add_class("up")
+        up.set_halign(Gtk.Align.END)
+        up.set_valign(Gtk.Align.END)
+        up.set_margin_end(28)
+        up.set_margin_bottom(24)
+        up.set_no_show_all(True)
+        up.connect("clicked", lambda _b: scroll.get_vadjustment().set_value(0))
+        overlay.add_overlay(up)
+        adj = scroll.get_vadjustment()
+        adj.connect("value-changed", lambda a: up.set_visible(a.get_value() > a.get_page_size() / 2))
+        box.pack_start(overlay, True, True, 0)
         box.show_all()
         self.gallery = box
         self.stack.add_named(box, "gallery")
@@ -3072,7 +3124,8 @@ class Paint:
         write_last(pic["id"])
         self.back_button.show()
         self.find_button.hide()
-        self.settings_button.hide()
+        # Настройки while painting too: "←" there comes back here.
+        self.settings_button.show()
         old = self.stack.get_child_by_name("board")
         if old:
             self.stack.remove(old)
@@ -3091,7 +3144,7 @@ class Paint:
         # finished picture to look at.
         tools = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         tools.get_style_context().add_class("tools")
-        for name, action, gap in ((("find", self.find, False),) if self.hint_shown else ()) + (
+        for name, action, gap in (("find", self.find, False),
                                   ("undo", self.board.undo_last, True),
                                   ("zoom-in", self.zoom_in, False),
                                   ("zoom-out", self.zoom_out, False),
@@ -3140,6 +3193,7 @@ class Paint:
         self.end_bar = None
 
         box.show_all()
+        self.find_tool.set_visible(self.hint_shown)
         self.stack.add_named(box, "board")
         self.stack.set_visible_child_name("board")
         first = next((n for n in range(len(pic["palette"])) if self.board.left(n)), 0)
@@ -3372,9 +3426,8 @@ class Paint:
         self.save()
         b = self.board
         b.show_finished()
-        for tool in (getattr(self, "find_tool", None), self.undo_tool, self.look_button):
-            if tool:
-                tool.hide()
+        for tool in (self.find_tool, self.undo_tool, self.look_button):
+            tool.hide()
         self.pal_scroll.hide()
         self.show_end()
         if celebrate:
@@ -3475,10 +3528,12 @@ class Paint:
     def show_settings(self):
         """Настройки, in sections: Подсветка (how the chosen number's
         regions stand out, a pattern and its colour, each shown as it
-        looks), Подсказки («где?»: shown, how often, how far it zooms; the
-        rings), Звук и вибрация, Конец картины (the replay) and Раскраски
-        (how the gallery shows pictures not begun). Each is kept at once
-        and holds from the next picture opened."""
+        looks), Нажатия (how far beside a region a tap still paints it),
+        Подсказки («где?»: shown, how often, how far it zooms; the rings),
+        Звук и вибрация, Конец картины (the replay) and Раскраски (how the
+        gallery shows pictures not begun). Each is kept at once; opened
+        from a picture, "←" goes back to it as it was, with them in force."""
+        self.settings_from = self.stack.get_visible_child_name()
         self.title.set_text("Настройки")
         self.back_button.show()
         self.find_button.hide()
@@ -3519,6 +3574,13 @@ class Paint:
                 row.attach(b, n % 5, n // 5, 1, 1)
                 self.look_buttons.append((b, key, value, sample))
             box.pack_start(row, False, False, 0)
+        # Any of them the other way round: the colour as the ground.
+        self.choice(box, "Цвета подсветки:", ((False, "Обычные"), (True, "Наоборот")),
+                    "highlight-invert", self.highlight.inverted,
+                    lambda v: self.choose_look("invert", v))
+        section("Нажатия")
+        self.choice(box, "Нажатие рядом с маленькой областью выбранного цвета закрашивает её:",
+                    FINGERS, "finger", self.finger, lambda v: setattr(self, "finger", v))
         section("Подсказки")
         self.choice(box, "Кнопка «где?» (находит область выбранного цвета):",
                     ((True, "Показывать"), (False, "Не показывать")), "hint", self.hint_shown,
@@ -3536,6 +3598,9 @@ class Paint:
                     lambda v: setattr(self.feedback, "sound", v))
         self.choice(box, "И вибрация:", ((True, "Включена"), (False, "Выключена")), "vibration",
                     self.feedback.vibration, lambda v: setattr(self.feedback, "vibration", v))
+        self.choice(box, "Нажатие не на ту область — тихий звук (без вибрации):",
+                    ((True, "Включён"), (False, "Выключен")), "miss-sound", self.feedback.miss,
+                    lambda v: setattr(self.feedback, "miss", v))
         section("Конец картины")
         self.choice(box, "Картина раскрашивается ещё раз сама, за несколько секунд:",
                     ((True, "Показывать"), (False, "Не показывать")), "replay", self.replay,
@@ -3594,7 +3659,8 @@ class Paint:
         """A sample of a choice: a patch of it with a number on it, as the
         board will show it (the other choice as it is now)."""
         look = Highlight(value if key == "style" else self.highlight.style,
-                         value if key == "colour" else self.highlight.colour)
+                         value if key == "colour" else self.highlight.colour,
+                         self.highlight.inverted)
         w, h = widget.get_allocated_width(), widget.get_allocated_height()
         cr.set_source_rgb(0.9, 0.9, 0.89)
         cr.paint()
@@ -3626,7 +3692,8 @@ class Paint:
             self.settings.set("highlight-colour", value)
         if key:
             self.highlight = Highlight(value if key == "style" else self.highlight.style,
-                                       value if key == "colour" else self.highlight.colour)
+                                       value if key == "colour" else self.highlight.colour,
+                                       value if key == "invert" else self.highlight.inverted)
         for b, k, v, sample in self.look_buttons:
             on = v == (self.highlight.style if k == "style" else self.highlight.colour)
             (b.get_style_context().add_class if on else b.get_style_context().remove_class)("on")
@@ -3660,6 +3727,9 @@ class Paint:
         return False
 
     def back(self):
+        if self.stack.get_visible_child_name() == "settings" and self.settings_from == "board":
+            self.back_to_board()
+            return
         if self.stack.get_visible_child_name() == "settings":
             stale, self.gallery_stale = self.gallery_stale, False
             self.show_gallery(rebuild=stale)
@@ -3678,6 +3748,23 @@ class Paint:
         self.board = None
         stale, self.gallery_stale = self.gallery_stale, False
         self.show_gallery(rebuild=stale, changed=changed)
+
+    def back_to_board(self):
+        """From Настройки to the picture being painted, as it was: its
+        highlight drawn again, «где?» shown or not, its count anew."""
+        b = self.board
+        self.back_button.show()
+        self.find_button.hide()
+        self.settings_button.show()
+        self.stack.set_visible_child_name("board")
+        self.refresh_swatches()  # the header's name and share
+        if not b.finished:
+            self.find_tool.set_visible(self.hint_shown)
+            self.hints_shown()
+        # Tiles of the new highlight: all drawn again.
+        b.base = None
+        b.tiles.clear()  # not stretched in meanwhile: they have the old one
+        b.set_scale(b.scale)
 
     def save(self):
         if self.board:

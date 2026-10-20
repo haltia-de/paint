@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0
-"""Отклик: a sound and a buzz when a colour or the whole picture is done.
+"""Отклик: a sound and a buzz when a colour or the whole picture is done,
+and a quiet sound, no buzz, for a tap on a region of another colour.
 
-    feedback = Feedback(sounds_folder, app_id, sound=True, vibration=True)
+    feedback = Feedback(sounds_folder, app_id, sound=True, vibration=True,
+                        miss=True)
     feedback.colour_done()
     feedback.picture_done()
+    feedback.missed()
 
-The sound is one of the program's own files (colour.oga, picture.oga),
-played by paplay in a process of its own: the tablet runs PulseAudio and
+The sound is one of the program's own files (colour.oga, picture.oga,
+miss.oga), played by paplay in a process of its own: the tablet runs PulseAudio and
 has paplay but not GStreamer's PulseAudio output, a desktop's PipeWire
 takes paplay too, and nothing is loaded into the program. Without paplay
 it stays silent.
@@ -28,14 +31,16 @@ PICTURE_EVENT = "message-new-email"  # 750 ms
 
 
 class Feedback:
-    def __init__(self, sounds, app_id, sound=True, vibration=True, player=None, bus=None):
-        """sounds: the folder of colour.oga and picture.oga. player and bus
+    def __init__(self, sounds, app_id, sound=True, vibration=True, miss=True, player=None,
+                 bus=None):
+        """sounds: the folder of the .oga files. player and bus
         stand in for paplay and the session bus in tests: player(argv),
         bus(app_id, event)."""
         self.sounds = sounds
         self.app_id = app_id
         self.sound = sound
         self.vibration = vibration
+        self.miss = miss  # the sound of a miss, when there is sound at all
         self.player = player or self._play
         self.bus = bus or self._buzz
         self._paplay = None
@@ -46,12 +51,16 @@ class Feedback:
     def picture_done(self):
         self._give("picture.oga", PICTURE_EVENT)
 
+    def missed(self):
+        if self.miss:
+            self._give("miss.oga", None)
+
     def _give(self, name, event):
         if self.sound:
             path = os.path.join(self.sounds, name)
             if os.path.exists(path):
                 self.player(["paplay", path])
-        if self.vibration:
+        if self.vibration and event:
             self.bus(self.app_id, event)
 
     def _play(self, argv):

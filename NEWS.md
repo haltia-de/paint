@@ -1,5 +1,25 @@
 # Что нового · What's new
 
+## 4.7.0 (2026-10-20)
+
+### Русский
+
+- В галерее «Продолжить» и «Готовые» выделены цветом и стоят в одном ряду с «По темам» и «По сложности». Когда прокручиваешь вниз, появляется кнопка «Наверх».
+- «Настройки» (⚙) открываются и во время раскрашивания; «←» возвращает к картине, и выбранное сразу действует.
+- В «Настройках» можно выбрать, насколько нажатие рядом с маленькой областью ещё её закрашивает: только точно, немного, средне (как раньше) или сильно.
+- Штриховка выбранного цвета стала плотнее. Подсветку любого вида можно сделать «наоборот»: цвет становится фоном, а заливка — самим цветом, без бледности.
+- Звук в конце цвета стал мягче и ниже.
+- Нажатие не на ту область отзывается тихим низким звуком, без вибрации программы; его можно выключить.
+
+### English
+
+- In the gallery «Продолжить» and «Готовые» stand out in colour, in one row with «По темам» and «По сложности». Scrolled down, an «Наверх» (to the top) button shows.
+- Настройки (⚙) open while painting too; «←» goes back to the picture, with the choices in force at once.
+- Настройки choose how far beside a small region a tap still paints it: only right on it, a little, medium (as before) or a lot.
+- The stripes of the chosen colour are denser. Any highlight can be the other way round: the colour as the ground, a fill in the colour itself rather than a pale tint.
+- The sound at a colour's end is softer and lower.
+- A tap on a region of another colour gives a quiet low sound, with no buzz of the program's; it can be turned off.
+
 ## 4.6.0 (2026-10-20)
 
 ### Русский

@@ -71,21 +71,25 @@ answers 429 when downloading many files; `make-paintings.py` retries.
     from `pbn.py --progress`). `tests/fake_pbn.py` stands in for pbn.py.
   - `haltia_paint/highlight.py` — Подсветка: how the chosen number's
     regions stand out (a pattern, `STYLES`, in a colour, `COLOURS`, among
-    them bright ones a painting hardly has; thin grey stripes by default;
+    them bright ones a painting hardly has; thin dense grey stripes by default;
     the pattern keeps `CELL` px at every zoom). A plain light blue got lost
     next to painted regions of a like colour. Chosen in Настройки (⚙ in the
-    gallery header), kept by `haltia_kit.settings` in
-    `~/.config/haltia/paint.conf` (`highlight`, `highlight-colour`, and
+    header of the gallery and of the board; from the board "←" goes back
+    to it as it was, `back_to_board`), kept by `haltia_kit.settings` in
+    `~/.config/haltia/paint.conf` (`highlight`, `highlight-colour`, `highlight-invert` (the colour as
+    the ground, a fill in the colour itself), and
     `new-in-colour`: pictures not begun shown in colour in the gallery;
     also `gallery-order`, chosen above the gallery; `hint`, `hint-limit`,
-    `hint-zoom` for «где?», `rings`, `sound`, `vibration`, `replay`).
+    `hint-zoom` for «где?», `rings`, `finger` (how far beside a region a
+    tap paints it), `sound`, `vibration`, `miss-sound`, `replay`).
     Outlines are
     `INK_PREVIEW`, a softer grey, in the preview and gallery.
   - `haltia_paint/feedback.py` — Отклик: a sound (`data/sounds/*.oga`,
     made by `data/sounds/make-sounds.py`, played by `paplay`: the tablet
     has PulseAudio but not GStreamer's PulseAudio output) and a buzz
     (feedbackd over D-Bus with the "quiet" profile, so it only
-    vibrates) when a colour or the picture is done.
+    vibrates) when a colour or the picture is done; a quiet sound and
+    no buzz for a miss (the shell's touchguard buzzes every tap anyway).
   - `haltia_paint/sections.py` — Разделы галереи: the gallery's sections
     by theme (`THEMES`, easier first within) or by difficulty (`BANDS`
     of region counts), with Продолжить (pictures begun, also left in

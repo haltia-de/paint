@@ -59,6 +59,17 @@ class HighlightTest(unittest.TestCase):
         px = draw(Highlight("hatch", "yellow").mark((0, 0, 0)).source(1.0))
         self.assertLess(min(sum(p) for row in px for p in row), 200)
 
+    def test_inverted_swaps_colour_and_ground(self):
+        # Grey stripes on light: mostly light; inverted, mostly grey.
+        def mean(look):
+            px = draw(look.mark((0, 0, 0)).source(1.0))
+            return sum(sum(p) for row in px for p in row) / (len(px) * len(px[0]))
+        self.assertGreater(mean(Highlight("hatch", "grey")),
+                           mean(Highlight("hatch", "grey", inverted=True)) + 100)
+        # A fill: the colour itself, darker than the tint.
+        self.assertGreater(mean(Highlight("fill", "blue")),
+                           mean(Highlight("fill", "blue", inverted=True)))
+
     def test_number_colour_follows_the_number(self):
         a = Highlight("fill", "number").mark((0.9, 0.1, 0.1))
         b = Highlight("fill", "number").mark((0.1, 0.1, 0.9))

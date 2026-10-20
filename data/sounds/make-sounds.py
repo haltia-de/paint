@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0
 """The program's two sounds, made here rather than taken from elsewhere:
-colour.oga, a soft bell when a colour is done, and picture.oga, a short
-rising tune when a picture is done. Soft bells (a few partials dying
-away), not loud: an older player hears them in a quiet room.
+colour.oga, a soft low chime when a colour is done (a higher one sounded
+sharp), picture.oga, a short rising tune when a picture is done, and
+miss.oga, a quiet low "тук" for a tap on a region of another colour.
+Soft bells (a few partials dying away, a slow start), not loud: an older
+player hears them in a quiet room.
 
     python3 data/sounds/make-sounds.py   # needs ffmpeg with libvorbis
 """
@@ -17,16 +19,17 @@ import wave
 RATE = 44100
 
 
-def bell(freq, length, loud):
-    """A bell-like note: the tone and two overtones, dying away."""
+def bell(freq, length, loud, attack=0.005, bright=1.0, decay=4.0):
+    """A bell-like note: the tone and two overtones (as loud as bright
+    says), dying away; attack s to rise, softer when longer."""
     out = []
     for k in range(int(RATE * length)):
         t = k / RATE
-        attack = min(1.0, t / 0.005)
-        v = (math.sin(2 * math.pi * freq * t) * math.exp(-t * 4.0)
-             + 0.4 * math.sin(2 * math.pi * freq * 2.0 * t) * math.exp(-t * 7.0)
-             + 0.15 * math.sin(2 * math.pi * freq * 3.01 * t) * math.exp(-t * 11.0))
-        out.append(loud * attack * v / 1.55)
+        rise = min(1.0, t / attack)
+        v = (math.sin(2 * math.pi * freq * t) * math.exp(-t * decay)
+             + 0.4 * bright * math.sin(2 * math.pi * freq * 2.0 * t) * math.exp(-t * 7.0)
+             + 0.15 * bright * math.sin(2 * math.pi * freq * 3.01 * t) * math.exp(-t * 11.0))
+        out.append(loud * rise * v / 1.55)
     return out
 
 
@@ -59,9 +62,13 @@ def write(path, track):
 
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
-    # E6 and B6 together: "динь".
+    # G5 then C6, a slow start and few overtones: a calm "динь-дон".
     write(os.path.join(here, "colour.oga"),
-          mix([(0, bell(1318.5, 0.9, 0.30)), (0.02, bell(1975.5, 0.9, 0.15))], 0.9))
+          mix([(0, bell(783.99, 1.0, 0.22, attack=0.03, bright=0.3, decay=3.5)),
+               (0.12, bell(1046.5, 1.0, 0.16, attack=0.03, bright=0.3, decay=3.5))], 1.1))
+    # A low, short, dull note: "not this one", not a scolding.
+    write(os.path.join(here, "miss.oga"),
+          mix([(0, bell(196.0, 0.35, 0.30, attack=0.01, bright=0.15, decay=12.0))], 0.35))
     # C5 E5 G5, then C6 held.
     notes = [(0.0, 523.25), (0.16, 659.25), (0.32, 783.99), (0.48, 1046.5)]
     write(os.path.join(here, "picture.oga"),

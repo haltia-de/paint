@@ -26,6 +26,18 @@ class FeedbackTest(unittest.TestCase):
                          ["colour.oga", "picture.oga"])
         self.assertEqual(self.buzzed, [("app.id", COLOUR_EVENT), ("app.id", PICTURE_EVENT)])
 
+    def test_a_miss_sounds_but_does_not_buzz(self):
+        f = self.make()
+        f.missed()
+        self.assertEqual([os.path.basename(a[1]) for a in self.played], ["miss.oga"])
+        self.assertEqual(self.buzzed, [])
+        f = self.make(miss=False)
+        f.missed()
+        self.assertEqual(self.played, [])
+        f = self.make(sound=False)
+        f.missed()
+        self.assertEqual(self.played, [])
+
     def test_each_can_be_off(self):
         f = self.make(sound=False)
         f.colour_done()
@@ -41,7 +53,7 @@ class FeedbackTest(unittest.TestCase):
         self.assertEqual(self.played, [])
 
     def test_the_sounds_are_there(self):
-        for name in ("colour.oga", "picture.oga"):
+        for name in ("colour.oga", "picture.oga", "miss.oga"):
             with open(os.path.join(SOUNDS, name), "rb") as fh:
                 self.assertEqual(fh.read(4), b"OggS")
 
