@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Guidance for coding agents (Claude Code, Codex and others) working in this
-repository. `CLAUDE.md` is a link to this file.
+repository. `CLAUDE.md` only includes this file (`@AGENTS.md`).
 
 ## What this is
 
@@ -13,9 +13,10 @@ Big cells and buttons, no timer, score or ads. The UI and README are in
 Russian; code, comments, docstrings and commit messages are in English
 (British spelling: "colour").
 
-It was split out of lenovo-b8000h-linux; the shell's image build installs it
-from here by tag. Since v3.0 it is a standalone desktop program (ADR 0001 in
-lenovo-b8000h-linux: device / shell / programs): GApplication id
+It was split out of what is now haltia-de/device-lenovo-b8000h; the shell's
+image build installs it from here by tag. Since v3.0 it is a standalone
+desktop program (ADR 0001 in haltia-de/haltia, `docs/adr/0001-three-layers.md`:
+device / shell / programs): GApplication id
 `io.github.haltia_de.Paint` (also `GLib.set_prgname` before GTK loads, the
 Wayland app id), no `b8k_ui`, dialogs from `haltia_kit.dialogs`; it meets the
 shell only through `data/<id>.desktop` (`X-B8K-Home`, `X-B8K-Replaces`).
