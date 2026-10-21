@@ -1,5 +1,19 @@
 # Что нового · What's new
 
+## 4.7.4 (2026-10-21)
+
+### Русский
+
+Большие фотографии загружаются в нужном размере: при выборе фотографии и просмотре оригинала экран больше не зависает, а планшету хватает памяти. О повреждённой картинке появляется сообщение вместо сломанной страницы; программа запускается, даже если последняя открытая картинка повреждена.
+
+Светлые цвета, разделённые границей, остаются разными: белые стены и снег сохраняют оттенки.
+
+### English
+
+Large photos are decoded at the size needed: choosing a photo or viewing the original no longer freezes the screen or runs the tablet out of memory. A damaged picture is reported instead of breaking the page, and the program starts even if the last picture was damaged.
+
+Light colours divided by an edge stay apart, so white walls and snow keep their shading.
+
 ## 4.7.3 (2026-10-20)
 
 ### Русский
