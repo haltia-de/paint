@@ -49,7 +49,7 @@ from `~/Раскраски` by `move_photos()` with their ids) and `Gtk.FileChoo
 (no walking `/media`).
 
 ```
-PYTHONPATH=../b8k-compat ./haltia-paint   # run from the checkout (pictures/ and pbn.py beside it)
+PYTHONPATH=../kit ./haltia-paint   # run from the checkout (pictures/ and pbn.py beside it)
 ./haltia-paint --open ID       # go straight to one picture (e.g. builtin-fox, wd-Q123-4)
 sh install.sh [ROOT] [PREFIX]  # PREFIX /usr/local by default, /usr in the APKBUILD
 python3 make-paintings.py CACHE_DIR [SLUG...]  # regenerate pictures/*.svgz from Wikimedia Commons
