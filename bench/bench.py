@@ -4,13 +4,18 @@
 with numbers that say how near each comes to Happy Color, and a page to
 see them side by side.
 
-  python3 bench/bench.py CACHE OUT [--variants normal,big,ink] [--only SLUG,...] [--fetch]
+  python3 bench/bench.py CACHE OUT [--variants normal,big,ink,fast] [--only SLUG,...]
+                         [--fetch] [--fast PBN_CLI]
 
 CACHE holds the images that bench/images.txt lists (--fetch gets the
 missing ones from Wikimedia Commons); OUT gets index.html and pictures.
 Modes: normal; big (--big-numbers: no region too thin for a number read
 without zooming far in); ink and ink2 (big and --ink or --more-ink: the
-picture's own black outlines kept, few or more).
+picture's own black outlines kept, few or more); fast, another
+generator to measure against: fast-paint-by-numbers (github.com/ianho7,
+MIT, drake7707's algorithm in Rust), its pbn-cli given by --fast, on the
+same shrunk image, aiming at the level's regions and colours, its
+regions measured as pbn.py's are (the numbers placed by label_points).
 
 What it showed (October 2026, 11 images, against pbn.py before 4.3):
 smoothing that keeps edges and joining the neighbour most alike (colour,
@@ -26,6 +31,19 @@ where they would go now stay): borders along the shapes 51% to 56%
 with big numbers, likeness 7.1 to 6.8, for more small numbers (31% to
 43% need a large zoom).
 
+October 2026, 21 images (snow and white walls added): fast-paint-by-numbers
+took half the time (10 s against 21 s on the tablet, 1.3 s against 2.6 s
+here) but was further from the image (ΔE 8.9 against 7.1), its borders
+less along the shapes (41% against 58%), its palette with colours hardly
+told apart (ΔE min 3.5) and smooth skies in bands; it kept more of the
+faint shading of light parts (33% against 26%), which pbn.py lost by
+joining light colours under ΔE 9 apart. Light colours divided by an edge
+now stay down to EDGED_DE, and the guided filter flattens light parts
+less (faint 26% to 30%, likeness 7.1 to 6.9, numbers needing a large zoom
+45% to 39%, the tablet's time 20.6 to 21.7 s). Splitting large regions
+to reach the count was not done: what is lost are strips too thin for a
+number, and a region split in two of one colour only adds taps.
+
 Numbers (per image and on average):
   regions     how many, against the level's target
   colours     used; "rare" are colours with at most two regions
@@ -34,6 +52,9 @@ Numbers (per image and on average):
               is truer)
   contours    of the image's strong edges, the share a border follows
               (within a pixel): borders along the shapes, not across
+  faint       the same for the faint edges of light parts (the 75th to
+              90th percentile of edge strength where L* is over 70): the
+              shading of white walls and snow, which strong edges miss
   r median    half-width where the number goes, in picture units (1000
               on the long side); small r needs zooming in
   r<5         share of regions whose number needs a large zoom
@@ -43,8 +64,12 @@ Numbers (per image and on average):
 """
 import argparse
 import html
+import json
 import os
+import re
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -90,11 +115,49 @@ MODES = {"normal": {}, "big": {"min_radius": pbn.MIN_RADIUS_BIG},
          "ink": {"min_radius": pbn.MIN_RADIUS_BIG, "ink": 1},
          "ink2": {"min_radius": pbn.MIN_RADIUS_BIG, "ink": 2}}
 NAMES = {"normal": "обычные номера", "big": "крупные номера", "ink": "крупные + контуры мало",
-         "ink2": "крупные + контуры много"}
+         "ink2": "крупные + контуры много", "fast": "fast-paint-by-numbers"}
 INK = pbn.INK
+# fast-paint-by-numbers' settings: its defaults (drake7707's), but for the
+# count of regions and colours.
+FAST = {"random_seed": 0, "kmeans_min_delta": 1.0, "kmeans_color_space": "rgb",
+        "color_restrictions": [], "color_aliases": {}, "narrow_pixel_cleanup_runs": 3,
+        "remove_facets_smaller_than": 20, "remove_facets_from_large_to_small": True,
+        "border_smoothing_passes": 2,
+        "resize": {"enabled": False, "max_width": 1024, "max_height": 1024},
+        "show_labels": False, "show_borders": False, "fill_facets": True,
+        "log_level": "error", "debug_flags": []}
 
 
-def run(mode, img, level):
+def run_fast(cli, img, level):
+    regions, colours, _detail = pbn.LEVELS[level]
+    rgb = pbn.shrink(img, pbn.SIDE)
+    with tempfile.TemporaryDirectory() as tmp:
+        Image.fromarray(rgb).save(os.path.join(tmp, "in.png"))
+        with open(os.path.join(tmp, "config.json"), "w") as fh:
+            json.dump(dict(FAST, kmeans_clusters=colours, maximum_number_of_facets=regions), fh)
+        subprocess.run([cli, "-i", os.path.join(tmp, "in.png"), "-o", os.path.join(tmp, "out.svg"),
+                        "-c", os.path.join(tmp, "config.json"), "--format", "svg,debug.json",
+                        "--no-resize", "--quiet"], check=True)
+        with open(os.path.join(tmp, "out.debug.json")) as fh:
+            out = json.load(fh)
+    # Its own time, not writing the debug output.
+    total = out["metrics"]["stage_timings"]["total_ms"] / 1000
+    h, w = rgb.shape[:2]
+    ids, labels = np.unique(np.array(out["debug"]["facet_map"], np.int64), return_inverse=True)
+    labels = labels.reshape(h, w)
+    colour = {f["id"]: f["color_index"] for f in out["facets_summary"]}
+    colour_of = np.array([colour[int(i)] for i in ids])
+    palette = np.array([p["color"] for p in sorted(out["palette"], key=lambda p: p["index"])], float)
+    rows, cols, radius = pbn.label_points(labels, len(ids))
+    points = len(re.findall(r"[MQ] ", out["svg"]))
+    return {"rgb": rgb, "labels": labels, "colour_of": colour_of, "palette": palette,
+            "ink": None, "rows": rows, "cols": cols, "radius": radius, "points": points,
+            "target": regions, "time": {"total": total}}
+
+
+def run(mode, img, level, fast=None):
+    if mode == "fast":
+        return run_fast(fast, img, level)
     regions, colours, detail = pbn.LEVELS[level]
     timing = []
     start = time.monotonic()
@@ -124,14 +187,17 @@ def measure(res):
     border = np.zeros(labels.shape, bool)
     border[:, 1:] |= labels[:, 1:] != labels[:, :-1]
     border[1:, :] |= labels[1:, :] != labels[:-1, :]
-    strength = pbn.edges(pbn.lightness(rgb))
+    light = pbn.lightness(rgb)
+    strength = pbn.edges(light)
     strong = strength > np.percentile(strength, 90)
+    faint = (strength > np.percentile(strength, 75)) & ~strong & (light > 70)
     near = ndimage.binary_dilation(border, iterations=1)
     per_colour = np.bincount(colour_of[real], minlength=palette.shape[0])[used]
     r = res["radius"][real]
     return {"regions": n, "target": res["target"], "colours": len(used),
             "rare": int((per_colour <= 2).sum()), "de_min": float(d.min()),
             "likeness": float(like), "contours": float(near[strong].mean()),
+            "faint": float(near[faint].mean()) if faint.any() else 0.0,
             "r_median": float(np.median(r)), "r_small": float((r < 5).mean()),
             "slivers": int((r < 2.5).sum()), "points": res["points"],
             "time": res["time"]["total"], "times": res["time"]}
@@ -176,7 +242,8 @@ def draw(res, out_painted, out_player):
 
 COLUMNS = [("regions", "области", "%d"), ("colours", "цвета", "%d"), ("rare", "редкие", "%d"),
            ("de_min", "ΔE min", "%.1f"), ("likeness", "сходство ΔE↓", "%.1f"),
-           ("contours", "по контурам↑", "%.0f%%"), ("r_median", "r медиана↑", "%.1f"),
+           ("contours", "по контурам↑", "%.0f%%"), ("faint", "светлые грани↑", "%.0f%%"),
+           ("r_median", "r медиана↑", "%.1f"),
            ("r_small", "r<5↓", "%.0f%%"), ("slivers", "осколки↓", "%d"),
            ("points", "точки", "%d"), ("time", "время, с", "%.1f")]
 
@@ -252,8 +319,9 @@ def main():
     args.add_argument("--variants", default="normal,big,ink")
     args.add_argument("--only", default="")
     args.add_argument("--fetch", action="store_true")
+    args.add_argument("--fast", help="fast-paint-by-numbers' pbn-cli, for the fast variant")
     opts = args.parse_args()
-    variants = [v for v in opts.variants.split(",") if v in NAMES]
+    variants = [v for v in opts.variants.split(",") if v in NAMES and (v != "fast" or opts.fast)]
     os.makedirs(opts.out, exist_ok=True)
     results = {}
     for slug, level, name in images():
@@ -267,16 +335,16 @@ def main():
         img.load()
         per = {}
         for v in variants:
-            res = run(v, img, level)
+            res = run(v, img, level, opts.fast)
             per[v] = measure(res)
             draw(res, os.path.join(opts.out, "%s-%s-painted.jpg" % (slug, v)),
                  os.path.join(opts.out, "%s-%s-player.png" % (slug, v)))
             if v == variants[0]:
                 Image.fromarray(res["rgb"]).save(os.path.join(opts.out, slug + "-orig.jpg"), quality=88)
             m = per[v]
-            print("%-14s %s  %4d/%-4d regions  %2d colours  contours %3.0f%%  r~%4.1f  "
+            print("%-14s %s  %4d/%-4d regions  %2d colours  contours %3.0f%%  faint %3.0f%%  r~%4.1f  "
                   "r<5 %3.0f%%  like %4.1f  %5.1f s" % (
-                      slug, v, m["regions"], m["target"], m["colours"], 100 * m["contours"],
+                      slug, v, m["regions"], m["target"], m["colours"], 100 * m["contours"], 100 * m["faint"],
                       m["r_median"], 100 * m["r_small"], m["likeness"], m["time"]), flush=True)
         results[slug] = per
         page(opts.out, results, variants)

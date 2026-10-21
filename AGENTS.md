@@ -113,10 +113,13 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   `make-paintings.py` as a module and by the program as a subprocess.
 - `bench/` — стенд генератора: `bench.py CACHE OUT [--fetch]` runs the
   images of `images.txt` through pbn.py's modes (normal, big numbers,
-  big + ink) and writes `OUT/index.html` with numbers (regions, contours
-  followed, likeness, number sizes, time) and pictures side by side; its
-  docstring keeps what the comparisons showed (OpenCV was tried and left
-  out). Run it in `docker run alpine:3.24` with py3-numpy py3-scipy
+  big + ink; `fast`: fast-paint-by-numbers' pbn-cli given by `--fast`, to
+  measure against) and writes `OUT/index.html` with numbers (regions,
+  contours followed, faint edges of light parts, likeness, number sizes,
+  time) and pictures side by side; its docstring keeps what the
+  comparisons showed (OpenCV was tried and left out; fast-paint-by-numbers
+  is twice as fast on the tablet and worse but for light shading).
+  Quality is the same on the tablet as here; time it there. Run it in `docker run alpine:3.24` with py3-numpy py3-scipy
   py3-pillow ttf-dejavu (the tablet's versions). Change pbn.py with it:
   a step is better when the numbers say so on all the images.
 - `make-paintings.py` — offline generator for `pictures/*.svgz`. `PAINTINGS`
@@ -153,8 +156,10 @@ answers 429 when downloading many files; `make-paintings.py` retries.
   Wikidata; 9 = user photos. The gallery's sections no longer follow
   them (`haltia_paint/sections.py`).
 - **Generator** (`pbn.py`, after drake7707/paintbynumbersgenerator):
-  `shrink`, a guided filter (edges kept, brushwork flattened), Lab k-means
-  colours, mode filter, connected components, `merge`: small/thin regions
+  `shrink`, a guided filter (edges kept, brushwork flattened, less on
+  light parts), Lab k-means colours (at least `DISTINCT_DE` apart, light
+  ones divided by an edge down to `EDGED_DE`: the shading of white walls
+  and snow), mode filter, connected components, `merge`: small/thin regions
   go to the neighbour scored by shared border × colour likeness × weak
   edge (`edges`), and same-coloured neighbours join every round so the
   count reached is the count aimed at (area first, thinness by distance

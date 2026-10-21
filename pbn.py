@@ -58,6 +58,12 @@ MIN_RADIUS, MIN_RADIUS_BIG = 2.5, 3.5
 # detail that stays (an eye, a highlight), if no thinner than this
 # (picture units).
 DETAIL_DE, DETAIL_RADIUS = 18, 2.0
+# Colours of the palette are at least DISTINCT_DE apart (Lab ΔE), or
+# EDGED_DE where both are light (L* over LIGHT) and what divides them is
+# an edge of the picture (its pixels EDGED strong on average, edges()):
+# the shading of a white wall or of snow stays, the bands of a smooth
+# sky and the mottling of a dark ground do not.
+DISTINCT_DE, EDGED_DE, EDGED, LIGHT = 9, 4, 0.12, 60
 # The colour of a picture's own outlines (--ink).
 INK = (34, 30, 28)
 # How much of the picture's darkness counts as its outlines, by --ink
@@ -115,15 +121,19 @@ def shrink(img, side, crop=None):
     return np.asarray(img.resize(size, Image.LANCZOS).filter(ImageFilter.MedianFilter(3)))
 
 
-def guided(rgb, radius=3, eps=0.0025):
+def guided(rgb, radius=3, eps=0.0025, eps_light=0.001):
     """Flat where the picture varies little, its edges kept: a guided
     filter of each channel by itself (He et al.), box filters only, its
     coefficients worked out at half the size (the "fast guided filter":
     a quarter of the work, on the tablet some 2 s less). The brush strokes
-    and grain that would make speckled regions go."""
+    and grain that would make speckled regions go. eps_light where the
+    picture is light (L* over LIGHT): less flattening keeps the faint
+    shading of white walls and snow."""
     h, w, _ = rgb.shape
     out = np.empty(rgb.shape, np.float32)
     size = radius  # about the box of 2 radius + 1 at half the size
+    light = ndimage.uniform_filter(lightness(rgb[::2, ::2]), size) > LIGHT
+    eps = np.where(light, eps_light, eps).astype(np.float32)
     for c in range(3):
         i = rgb[:, :, c].astype(np.float32) / 255
         half = i[::2, ::2]
@@ -179,10 +189,26 @@ def ink_lines(light, width=7, contrast=12, dark=45, least=20, ground=50):
     return keep[parts]
 
 
-def reduce(rgb, colours, detail=5):
+def edged(idx, strength, n):
+    """How strong, on average, the edge is where colour a meets colour
+    b: an (n, n) array, 0 where they never meet."""
+    total, count = np.zeros(n * n), np.zeros(n * n)
+    for a, b, s in ((idx[:, 1:], idx[:, :-1], strength[:, 1:] + strength[:, :-1]),
+                    (idx[1:, :], idx[:-1, :], strength[1:, :] + strength[:-1, :])):
+        meet = a != b
+        pair = (a[meet] * n + b[meet]).astype(np.int64)
+        total += np.bincount(pair, s[meet] / 2, n * n)
+        count += np.bincount(pair, minlength=n * n)
+    total, count = total.reshape(n, n), count.reshape(n, n)
+    total, count = total + total.T, count + count.T
+    return np.where(count > 0, total / count.clip(1), 0)
+
+
+def reduce(rgb, colours, detail=5, strength=None):
     """The small picture reduced to at most colours: (index array,
     palette as a list of (r, g, b)). Speckles smaller than detail pixels
-    join what surrounds them."""
+    join what surrounds them. strength (edges()), if given, keeps
+    nearer colours apart where an edge divides them (EDGED_DE)."""
     h, w, _ = rgb.shape
     flat = rgb.reshape(-1, 3)
     pixels = lab(flat)
@@ -192,13 +218,19 @@ def reduce(rgb, colours, detail=5):
     centres, _ = kmeans2(sample, colours + 6, minit="++", seed=rng, iter=20)
     idx, _ = vq(pixels, centres)
     counts = np.bincount(idx, minlength=len(centres))
+    edge = (edged(idx.reshape(h, w), strength, len(centres)) if strength is not None
+            else np.zeros((len(centres), len(centres))))
+    light = centres[:, 0] > LIGHT
+    edge[~light] = edge[:, ~light] = 0
     # Most used first; a colour hard to tell from one already kept goes
     # to that one.
     keep, to = [], np.zeros(len(centres), np.int64)
     for i in np.argsort(-counts):
         if not counts[i]:
             continue
-        near = [k for k, j in enumerate(keep) if np.linalg.norm(centres[i] - centres[j]) < 9]
+        near = [k for k, j in enumerate(keep)
+                if np.linalg.norm(centres[i] - centres[j])
+                < (EDGED_DE if edge[i, j] >= EDGED else DISTINCT_DE)]
         if near or len(keep) == colours:
             d = [np.linalg.norm(centres[i] - centres[j]) for j in keep]
             to[i] = int(np.argmin(d))
@@ -586,8 +618,9 @@ def picture(img, regions=300, colours=18, side=SIDE, detail=5, crop=None,
         rgb_fill = rgb[iy, ix]
     else:
         rgb_fill = rgb
+    strength = edges(light)
     lap("shrink")
-    idx, count = reduce(guided(rgb_fill), colours, detail)
+    idx, count = reduce(guided(rgb_fill), colours, detail, strength)
     keep = mean_colours(idx, rgb_fill, count)
     ink_colour = None
     if lines is not None:
@@ -601,7 +634,7 @@ def picture(img, regions=300, colours=18, side=SIDE, detail=5, crop=None,
     if min_area is None:
         min_area = w * h / regions / 30
     colour_lab = lab(np.array(keep, np.uint8))
-    labels, colour_of = merge(labels, colour_of, colour_lab, edges(light), regions,
+    labels, colour_of = merge(labels, colour_of, colour_lab, strength, regions,
                               min_area, min_radius, ink_colour)
     lap("merge %d" % len(colour_of))
     n = len(colour_of)

@@ -12,3 +12,14 @@ horse-fair | 4 | Rosa Bonheur, The Horse Fair, 1852–55.jpg
 mona-lisa | 4 | Mona Lisa, by Leonardo da Vinci, from C2RMF retouched.jpg
 girl-pearl | 3 | 1665 Girl with a Pearl Earring.jpg
 photo-flower | 3 | photo-flower.jpg
+# Snow and white walls: light faces whose edges are faint.
+egrets-snow | 3 | Ohara Shoson (Koson), Egrets in Snow, 1927.jpg
+snow-bridge | 3 | Two women in snow on Yanagi Bridge (5759536190) (cropped).jpg
+kameyama-snow | 3 | Hiroshige-53-Stations-Hoeido-47-Kameyama-MFA-02.jpg
+mukojima-snow | 3 | Kawase Hasui (1931) Snow in Mukojima.jpg
+winter | 4 | Ivan Shishkin - Winter.JPG
+nerl-church | 4 | Bogolyubovo asv2019-01 img02 Intercession Church.jpg
+oia | 4 | White houses of Oia on Santorini (52181448879).jpg
+taj-mahal | 4 | Taj Mahal, Agra, India edit2.jpg
+mykonos-mills | 4 | Windmills in Mykonos 02.jpg
+sacre-coeur | 4 | Paris 75018 Basilique du Sacré-Cœur south facade stairs 20041107 (1).jpg
