@@ -3,7 +3,7 @@
 The names the code and its reviews use for the parts of the game.
 
 - **Picture** (картина, раскраска): a painting or photo split into numbered
-  regions, kept as a `.svgz` (see CLAUDE.md for the format); its id names
+  regions, kept as a `.svgz` (see AGENTS.md for the format); its id names
   where it came from: `builtin-`, `photo-`, `wd-`.
 - **Level**: the size of regions, 2/3/4/5 (about 120/300/600/1000
   regions); in the gallery also 8 (downloaded) and 9 (own photo).

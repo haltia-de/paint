@@ -1,0 +1,227 @@
+# AGENTS.md
+
+Guidance for coding agents (Claude Code, Codex and others) working in this
+repository. `CLAUDE.md` is a link to this file.
+
+## What this is
+
+`haltia-paint` is a colour-by-number game on public-domain paintings in the style
+of Happy Color / Daily Coloring (numbered irregular regions), made for an
+older player on a Lenovo YOGA Tablet 10 (B8000-H) running the
+Haltia shell ([haltia-de/device-lenovo-b8000h](https://github.com/haltia-de/device-lenovo-b8000h)).
+Big cells and buttons, no timer, score or ads. The UI and README are in
+Russian; code, comments, docstrings and commit messages are in English
+(British spelling: "colour").
+
+It was split out of lenovo-b8000h-linux; the shell's image build installs it
+from here by tag. Since v3.0 it is a standalone desktop program (ADR 0001 in
+lenovo-b8000h-linux: device / shell / programs): GApplication id
+`io.github.haltia_de.Paint` (also `GLib.set_prgname` before GTK loads, the
+Wayland app id), no `b8k_ui`, dialogs from `haltia_kit.dialogs`; it meets the
+shell only through `data/<id>.desktop` (`X-B8K-Home`, `X-B8K-Replaces`).
+Since 4.0 (ADR 0004, repo haltia-de/paint) the package is `haltia-paint`
+(`provides`/`replaces` b8k-paint); until 5.0 the old names stay: the
+`b8k-paint` command is a link, `data/io.github.trudenboy.Paint.desktop` is a
+hidden entry, and `main()` moves `~/.local/share/b8k-paint` to `haltia-paint`
+(`haltia_kit.paths.migrate_dirs`).
+The shell's GTK theme sizes the header and dialogs. The shell buzzes every
+tap, except for a program whose .desktop says `X-Haltia-Own-Feedback=true`
+(haltia-shell 2.8): this one does, so it buzzes its own taps (buttons,
+right taps on the board, through `Feedback.tapped`) and not a miss. Buttons
+are seen in `Gdk.event_handler_set` (lifted where they went down): a
+GObject emission hook on Gtk.Button "clicked" crashed GTK's file chooser. Don't
+edit the lenovo repo; tell its session the new tag.
+
+## Running and installing
+
+Tests: `python3 -m unittest discover -s tests` (stdlib only, no GTK or
+numpy; the APKBUILD's `check()` runs them); `uvx pyflakes haltia-paint
+pbn.py make-paintings.py haltia_paint tests` is a quick check. Requirements: Python 3, GTK 3,
+PyGObject, pycairo, Pillow; `pbn.py` also needs numpy and scipy (Alpine:
+`apk add python3 py3-gobject3 gtk+3.0 py3-cairo py3-pillow py3-numpy py3-scipy`); exact tested versions for a
+Flatpak in `requirements.txt`). No path is built from `~` (`expanduser`): in a Flatpak the home folder
+is there but unreadable, so folders come from `GLib.get_user_*_dir()` and
+`get_user_special_dir()`. Nothing may hard-code `/usr`: everything
+is found from the program's own place (a Flatpak has `/app`). Own pictures come only
+from XDG Pictures (photos to make into pictures in `Pictures/Раскраски`, moved
+from `~/Раскраски` by `move_photos()` with their ids) and `Gtk.FileChooserNative`
+(no walking `/media`).
+
+```
+PYTHONPATH=../b8k-compat ./haltia-paint   # run from the checkout (pictures/ and pbn.py beside it)
+./haltia-paint --open ID       # go straight to one picture (e.g. builtin-fox, wd-Q123-4)
+sh install.sh [ROOT] [PREFIX]  # PREFIX /usr/local by default, /usr in the APKBUILD
+python3 make-paintings.py CACHE_DIR [SLUG...]  # regenerate pictures/*.svgz from Wikimedia Commons
+python3 pbn.py -v --level 3 IMAGE OUT.svgz     # one picture; levels 3/4/5 = ~300/600/1000 regions
+```
+
+`BUILTIN`, `PBN` and the `haltia_paint` package are found beside the program
+in a checkout (`pictures/`, `pbn.py`, `haltia_paint/`), else under the install
+prefix (`PREFIX/share/haltia-paint/`, `PREFIX/lib/haltia-paint/pbn.py` and
+`.../haltia_paint/`).
+
+The tablet (Lenovo B8000-H) is armv7, 1 GB RAM: `pbn.py` takes ~15 s for 300
+regions and ~20 s for 600 there, a full-screen redraw ~0.75 s. Commons
+answers 429 when downloading many files; `make-paintings.py` retries.
+
+## Layout
+
+- `haltia-paint` — the program (no `.py` extension): GTK pages, board,
+  gallery. Module docstring describes the behaviour in detail; keep it in
+  sync. What needs no screen moves into the `haltia_paint/` package, one
+  deep module at a time, each tested in `tests/` (see `CONTEXT.md` for the
+  names):
+  - `haltia_paint/convert.py` — Преобразование: the one queue of `pbn.py`
+    runs (one process at a time, urgent before background, background
+    stopped and started again for urgent work, cancel, timeout, progress
+    from `pbn.py --progress`). `tests/fake_pbn.py` stands in for pbn.py.
+  - `haltia_paint/highlight.py` — Подсветка: how the chosen number's
+    regions stand out (a pattern, `STYLES`, in a colour, `COLOURS`, among
+    them bright ones a painting hardly has; thin dense grey stripes by default;
+    the pattern keeps `CELL` px at every zoom). A plain light blue got lost
+    next to painted regions of a like colour. Chosen in Настройки (⚙ in the
+    header of the gallery and of the board; from the board "←" goes back
+    to it as it was, `back_to_board`), kept by `haltia_kit.settings` in
+    `~/.config/haltia/paint.conf` (`highlight`, `highlight-colour`, `highlight-invert` (the colour as
+    the ground, a fill in the colour itself), and
+    `new-in-colour`: pictures not begun shown in colour in the gallery;
+    also `gallery-order`, chosen above the gallery; `hint`, `hint-limit`,
+    `hint-zoom` for «где?», `rings`, `finger` (how far beside a region a
+    tap paints it), `sound`, `vibration`, `tap-buzz` (which taps on the board buzz: `hit`,
+    `miss`, `both`, `none`), `miss-sound`, `replay`).
+    Outlines are
+    `INK_PREVIEW`, a softer grey, in the preview and gallery.
+  - `haltia_paint/feedback.py` — Отклик: a sound (`data/sounds/*.oga`,
+    made by `data/sounds/make-sounds.py`, played by `paplay`: the tablet
+    has PulseAudio but not GStreamer's PulseAudio output) and a buzz
+    (the shell's haltia-press, a 70 ms pulse of the motor: one for a tap,
+    two for a colour, three for a picture; feedbackd only without it, as
+    on the tablet its motor never moved) when a colour or the picture is done; a quiet sound and
+    no buzz for a miss; `tapped()` buzzes the other taps, only while the
+    shell leaves them to the program (`$XDG_RUNTIME_DIR/haltia/quiet-taps`).
+  - `haltia_paint/sections.py` — Разделы галереи: the gallery's sections
+    by theme (`THEMES`, easier first within) or by difficulty (`BANDS`
+    of region counts), with Продолжить (pictures begun, also left in
+    their section) first and Готовые (finished, only there) last; the
+    note under a card's name says what its heading does not. A
+    downloaded picture's theme comes from its Wikidata genre (P136) or
+    what it depicts (P180) (`theme_of`), kept by item in
+    `~/.local/share/haltia-paint/themes.json` (the preview's «Тема» can
+    change it; pictures downloaded before 4.5 carried their artist there
+    and are looked up once); own photos are Мои фотографии.
+- `pbn.py` — the region generator (raster to paint-by-number SVG), used by
+  `make-paintings.py` as a module and by the program as a subprocess.
+- `bench/` — стенд генератора: `bench.py CACHE OUT [--fetch]` runs the
+  images of `images.txt` through pbn.py's modes (normal, big numbers,
+  big + ink) and writes `OUT/index.html` with numbers (regions, contours
+  followed, likeness, number sizes, time) and pictures side by side; its
+  docstring keeps what the comparisons showed (OpenCV was tried and left
+  out). Run it in `docker run alpine:3.24` with py3-numpy py3-scipy
+  py3-pillow ttf-dejavu (the tablet's versions). Change pbn.py with it:
+  a step is better when the numbers say so on all the images.
+- `make-paintings.py` — offline generator for `pictures/*.svgz`. `PAINTINGS`
+  lists slug, Commons file name, Russian title, theme, level; all are made
+  with big numbers, those in `INK` with their own black outlines (level 1,
+  or 2 for those also in `INK_MORE`).
+- `pictures/originals/<slug>.jpg` — the paintings the built-ins were
+  cut from (`make-paintings.py --originals`, through `pbn.shrink`, 800
+  px), for «Оригинал» at a picture's end; a downloaded picture keeps
+  its painting as `downloaded/<item>.jpg`.
+- `pictures/*.svgz` — built-in pictures, gzipped SVG: one `<path>` per
+  region (`fill-rule` evenodd, holes as inner rings, `M x y x y ...Z`) with
+  `data-n` (colour number from 1, light to dark) and `data-label` "x y r"
+  (where the number goes, inradius); at most one `<path data-ink="1">`
+  after them, the picture's own outlines (`--ink`), drawn black on top,
+  not a region; root carries `data-palette`, `data-count` (regions, ink
+  not counted), `data-sig` (fingerprint of the regions), `data-mode`
+  ("big", "ink"/"ink2"), `data-name`, `data-theme`, `data-level`, `data-source`.
+- `data/` — `.desktop`, hicolor SVG icon, AppStream metainfo.
+- Packages: `packaging/alpine/APKBUILD`; `debian/` (deps from noble and
+  trixie plus our `python3-haltia-kit`; the pre-4.0 names are left out);
+  `packaging/flatpak/io.github.haltia_de.Paint.yml` (GNOME 51, its
+  Python 3.14; `haltia-kit.yml` is a copy of haltia-de/kit's module;
+  numpy, scipy, Pillow as cp314 manylinux wheels per arch, keep them at
+  `requirements.txt`; pycairo from the runtime; `--filesystem=xdg-pictures`).
+  Build the Flatpak from the checkout with
+  `flatpak run org.flatpak.Builder --user --install --force-clean build <manifest>`.
+
+## Architecture notes
+
+- **Levels** are numeric codes in the SVG; 2 = ~120 regions (some built-ins); 3/4/5 = at most 300/600/1000 regions with 18/24/28
+  colours (`LEVELS` in `pbn.py`, `GRADES` in `haltia-paint` must agree);
+  built-ins use 3 and 4, 5 only for downloads; 8 = downloaded from
+  Wikidata; 9 = user photos. The gallery's sections no longer follow
+  them (`haltia_paint/sections.py`).
+- **Generator** (`pbn.py`, after drake7707/paintbynumbersgenerator):
+  `shrink`, a guided filter (edges kept, brushwork flattened), Lab k-means
+  colours, mode filter, connected components, `merge`: small/thin regions
+  go to the neighbour scored by shared border × colour likeness × weak
+  edge (`edges`), and same-coloured neighbours join every round so the
+  count reached is the count aimed at (area first, thinness by distance
+  transform only when sizes are right; `MIN_RADIUS`, or `MIN_RADIUS_BIG`
+  with `--big-numbers`); a detail stays (a region still `DETAIL_DE` from
+  the neighbour it would join, down to a third of min_area and
+  `DETAIL_RADIUS`: a cat's pupil and iris), and over the count the least
+  worth go first (area × how much it stands out from its surroundings); `--ink` / `--more-ink` (level 1 / 2): `ink_lines` (black-hat with
+  hysteresis, only dark lines on a ground lighter than `INK_GROUND[level]`,
+  nothing broader than a line) become fixed regions of colour `INK` that
+  take tiny cells between lines;
+  numbers in the middle of each region's widest part (`label_points`);
+  then borders traced once per region pair on pixel corners so neighbours
+  share them exactly, smoothed and simplified. Coordinates: 1000 units on
+  the long side. `picture(..., raster=True)` also returns the pixels (the
+  seam the bench and `tests/test_pbn.py` use).
+- **Rendering** (`Board`): the board pans and zooms itself (a
+  ScrolledWindow cost a third of the frames); it is drawn in `TILE` px
+  tiles, in a thread of its own, cached until the zoom changes. A tap
+  paints its region into the tiles kept; the chosen colour's highlight is
+  part of the tiles, so changing colour repaints the regions of the old
+  and new colour in the tiles in view. Hit test: a `GRID` of region
+  boxes, then `cairo.in_fill`; a miss falls back to the nearest unpainted
+  region of the chosen colour within `FINGER` px via `in_stroke`.
+- **Picture ids** prefix the source: `builtin-<slug>`, `photo-<hash>`,
+  `wd-<QID>-<kind>` (kind: level, then `b` for big numbers, `k` per ink
+  level, e.g. `3bk`, `4bkk`; before 4.3 only the level). Progress lives in
+  `~/.local/share/haltia-paint/progress/<id>.json` as `{"count", "sig",
+  "filled": [region indexes], "hints": times «где?» was used, "order":
+  [the regions in the order painted, for the replay]}` (the last two
+  since 4.6); a count or `sig` mismatch resets it (a
+  picture made again). `last` stores the last opened id.
+- **Preview kinds**: a grade plus «Крупные номера» (on or off) and
+  «Контуры: нет / мало / много» (ink 0/1/2) (`Paint.kind()`, kept between
+  previews; big numbers on, no outlines by default); each kind is its own urgent conversion. Photos of Раскраски
+  are made with big numbers.
+- **Photos and downloads** are converted through `Conversion`
+  (`haltia_paint/convert.py`): `pbn.py` in a niced subprocess, one at a
+  time (1 GB of RAM); a preview is urgent and stops a photo, which starts
+  again after it; leaving the preview cancels its sizes. Photos cache to
+  `~/.local/share/haltia-paint/photos/` (a photo that failed gets
+  `<key>.failed` and is tried again only from its «Ещё раз» button),
+  search previews to `.../work/`.
+- Regions are parsed lazily (`regions_of`); gallery thumbnails render on
+  first draw and are cached as PNG; progress is written shortly after the
+  last tap.
+- **Network** (search, "+ Найти"): only https to wikidata.org,
+  commons.wikimedia.org and the Wikimedia image hosts (`IMAGE_HOSTS`), with
+  `AGENT` as User-Agent. Work runs in background threads / `Workers` (a
+  few threads; concurrent.futures took a third of a second to import);
+  results return to GTK via `GLib.idle_add`, with a
+  generation counter (`search_gen`) to drop stale results.
+
+## Conventions
+
+- Commit messages: `haltia-paint: <short sentence>.` style (`b8k-paint:` before 4.0).
+- Files carry `SPDX-License-Identifier: GPL-2.0-or-later` (GPL-2.0-only
+  until 4.7.3; "or later" so an Android port can use Apache-2.0 libraries); LF line endings
+  (`.gitattributes`).
+- What each release brings is written in `NEWS.md`, in Russian and English
+  (`## X.Y.Z (YYYY-MM-DD)`, `### Русский`, `### English`; what the person
+  will notice), before the tag; `python3 <haltia-de/ci>/news.py metainfo
+  NEWS.md data/io.github.haltia_de.Paint.metainfo.xml` writes the
+  metainfo's `<releases>` from it, and the release's CI checks they agree
+  (`--check`). haltia-update shows the Russian as «Что нового» before
+  installing. `debian/changelog` gets each version too
+  (CI checks it equals the tag).
+- Inside the Haltia shell (`ON_HALTIA`, from `XDG_CURRENT_DESKTOP`) the
+  header has no close button, the shell's ✕ covers it; elsewhere it shows
+  the desktop's buttons.
