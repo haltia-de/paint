@@ -1,3 +1,14 @@
+haltia-paint (4.7.4) unstable; urgency=medium
+
+  * Large photos are decoded at the size needed: choosing a photo or viewing
+    the original no longer freezes the screen or runs the tablet out of
+    memory. A damaged picture is reported instead of breaking the page, and
+    the program starts even if the last picture was damaged.
+  * Light colours divided by an edge stay apart, so white walls and snow keep
+    their shading.
+
+ -- Haltia <rensomail@gmail.com>  Wed, 21 Oct 2026 20:00:00 +0300
+
 haltia-paint (4.7.3) unstable; urgency=medium
 
   * Each gallery card keeps its own thumbnail: a picture begun no longer

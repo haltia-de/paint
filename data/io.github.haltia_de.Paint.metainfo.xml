@@ -19,6 +19,14 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
+    <release version="4.7.4" date="2026-10-21">
+      <description>
+        <p>Large photos are decoded at the size needed: choosing a photo or viewing the original no longer freezes the screen or runs the tablet out of memory. A damaged picture is reported instead of breaking the page, and the program starts even if the last picture was damaged.</p>
+        <p>Light colours divided by an edge stay apart, so white walls and snow keep their shading.</p>
+        <p xml:lang="ru">Большие фотографии загружаются в нужном размере: при выборе фотографии и просмотре оригинала экран больше не зависает, а планшету хватает памяти. О повреждённой картинке появляется сообщение вместо сломанной страницы; программа запускается, даже если последняя открытая картинка повреждена.</p>
+        <p xml:lang="ru">Светлые цвета, разделённые границей, остаются разными: белые стены и снег сохраняют оттенки.</p>
+      </description>
+    </release>
     <release version="4.7.3" date="2026-10-20">
       <description>
         <p>The pictures in «Продолжить» always show: a picture begun sometimes had one of its two cards left pale.</p>
