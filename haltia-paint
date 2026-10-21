@@ -112,6 +112,9 @@ own pictures among Мои фотографии) and opens it; "✕ Убрать"
 takes it out again. Only https requests to
 wikidata.org, commons.wikimedia.org and the Wikimedia image hosts are
 made.
+Photos and originals are decoded at display size in the worker pool;
+source images above 64 million pixels are rejected. A broken picture
+leaves the current page intact, and startup falls back to the gallery.
 """
 import collections
 import gzip
@@ -453,6 +456,15 @@ class Region:
 
 
 def regions_of(pic):
+    """Read regions atomically; report damaged picture data as an I/O error."""
+    try:
+        return read_regions(pic)
+    except (EOFError, ET.ParseError, ValueError, TypeError, AttributeError,
+            IndexError, KeyError, cairo.Error) as exc:
+        raise OSError("invalid picture regions: %s" % exc) from exc
+
+
+def read_regions(pic):
     """The regions, read only when a picture is drawn, and a grid of the
     regions whose box meets each GRID-unit square; the picture's own
     outlines (pbn.py --ink), if it has them, in pic["ink"]."""
@@ -465,6 +477,10 @@ def regions_of(pic):
             cr.new_path()
             for ring in el.get("d").split("M")[1:]:
                 v = [float(t) for t in ring.rstrip("Z").split()]
+                if len(v) % 2 or not all(math.isfinite(t) for t in v):
+                    raise ValueError("invalid region outline")
+                if len(v) < 6:
+                    continue
                 cr.move_to(v[0], v[1])
                 for i in range(2, len(v), 2):
                     cr.line_to(v[i], v[i + 1])
@@ -474,13 +490,19 @@ def regions_of(pic):
                 continue
             reg = Region()
             reg.n = int(el.get("data-n")) - 1
+            if not 0 <= reg.n < len(pic["palette"]):
+                raise ValueError("invalid colour number")
             reg.x, reg.y, reg.r = map(float, el.get("data-label").split())
+            if not all(math.isfinite(v) for v in (reg.x, reg.y, reg.r)) or reg.r < 0:
+                raise ValueError("invalid number position")
             reg.path = cr.copy_path()
             reg.box = x0, y0, x1, y1 = cr.path_extents()
             for gx in range(int(x0 // GRID), int(x1 // GRID) + 1):
                 for gy in range(int(y0 // GRID), int(y1 // GRID) + 1):
                     grid.setdefault((gx, gy), []).append(len(regions))
             regions.append(reg)
+        if len(regions) != pic["count"] or not regions:
+            raise ValueError("invalid region count")
         if ink:
             # All the outlines as one path, filled at once.
             cr.new_path()
@@ -638,15 +660,37 @@ def search_paintings(query, offset=0):
     return [f for f in found if f["thumb"]], more
 
 
+# A 48 MP camera photo fits; larger input is rejected before pixel allocation.
+MAX_IMAGE_PIXELS = 64_000_000
+
+
+def pixbuf_file(path, width, height):
+    """Decode a local image at display size, with a cap on source pixels."""
+    info = GdkPixbuf.Pixbuf.get_file_info(path)
+    if not info or not info[0] or not 0 < info[1] * info[2] <= MAX_IMAGE_PIXELS:
+        raise OSError("invalid image or too many image pixels")
+    return GdkPixbuf.Pixbuf.new_from_file_at_scale(path, width, height, True).apply_embedded_orientation()
+
+
 def pixbuf_of(data, width, height):
-    """Image bytes as a pixbuf that fits width x height."""
+    """Image bytes decoded to fit width x height, with bounded pixels."""
     loader = GdkPixbuf.PixbufLoader()
+    oversized = []
+
+    def prepared(loader, w, h):
+        if not 0 < w * h <= MAX_IMAGE_PIXELS:
+            oversized.append(True)
+            loader.set_size(1, 1)
+        else:
+            scale = min(width / w, height / h)
+            loader.set_size(max(1, int(w * scale)), max(1, int(h * scale)))
+
+    loader.connect("size-prepared", prepared)
     loader.write(data)
     loader.close()
-    pb = loader.get_pixbuf()
-    scale = min(width / pb.get_width(), height / pb.get_height())
-    return pb.scale_simple(max(1, int(pb.get_width() * scale)),
-                           max(1, int(pb.get_height() * scale)), GdkPixbuf.InterpType.BILINEAR)
+    if oversized:
+        raise OSError("too many image pixels")
+    return loader.get_pixbuf().apply_embedded_orientation()
 
 
 def kind_name(kind):
@@ -2123,9 +2167,7 @@ class Paint:
             done, total = share_done(pic, load_progress(pic))
             if done >= total:
                 pic = None
-        if pic:
-            self.open(pic)
-        else:
+        if not pic or not self.open(pic):
             self.show_gallery()
         self.win.show_all()
 
@@ -2134,6 +2176,7 @@ class Paint:
         """The gallery: built once and kept; a picture closed (changed)
         gets its cards again, or the whole gallery when it moves to
         another section (begun, finished). rebuild: pictures came or went."""
+        self.photo_request = None
         self.title.set_text("Раскраски")
         self.back_button.hide()
         self.find_button.show()
@@ -2651,23 +2694,38 @@ class Paint:
         self.photo_chosen(path)
 
     def photo_chosen(self, path):
-        try:
-            if os.path.getsize(path) > 40_000_000:
-                raise OSError("too large")
-            with open(path, "rb") as fh:
-                data = fh.read()
-            large = pixbuf_of(data, 640, 520)
-        except (OSError, GLib.Error) as exc:
-            sys.stderr.write("haltia-paint: %s: %s\n" % (path, exc))
-            dialogs.info(self.win, "Эту картинку не открыть.")
-            return
-        st = os.stat(path)
-        key = hashlib.sha1(("%s|%d|%d" % (path, st.st_size, st.st_mtime)).encode()).hexdigest()
-        self.show_preview({"qid": "own-" + key[:12],
-                           "title": os.path.splitext(os.path.basename(path))[0],
-                           "author": "", "year": None, "file": path, "data": data,
-                           "theme": sections.MY_PHOTOS,
-                           "large": large, "own": True})
+        self.photo_request = request = object()
+        page = self.stack.get_visible_child()
+
+        def loaded(item):
+            if self.photo_request is request and self.stack.get_visible_child() is page:
+                if item is None:
+                    dialogs.info(self.win, "Эту картинку не открыть.")
+                else:
+                    self.show_preview(item)
+            return False
+
+        def work():
+            try:
+                st = os.stat(path)
+                if st.st_size > 40_000_000:
+                    raise OSError("too large")
+                large = pixbuf_file(path, 640, 520)
+                with open(path, "rb") as fh:
+                    data = fh.read(40_000_001)
+                if len(data) > 40_000_000:
+                    raise OSError("too large")
+                key = hashlib.sha1(("%s|%d|%d" % (path, st.st_size, st.st_mtime)).encode()).hexdigest()
+                item = {"qid": "own-" + key[:12],
+                        "title": os.path.splitext(os.path.basename(path))[0],
+                        "author": "", "year": None, "file": path, "data": data,
+                        "theme": sections.MY_PHOTOS, "large": large, "own": True}
+            except (OSError, GLib.Error) as exc:
+                sys.stderr.write("haltia-paint: %s: %s\n" % (path, exc))
+                item = None
+            GLib.idle_add(loaded, item)
+
+        self.pool.submit(work)
 
     def show_search(self):
         """The search page; it keeps its results while a painting is viewed."""
@@ -3022,6 +3080,7 @@ class Paint:
 
     def leave_preview(self):
         """The preview is left: the sizes still being made are not wanted."""
+        self.photo_request = None
         item = self.preview_item
         if item:
             for job in item.get("jobs", {}).values():
@@ -3136,12 +3195,14 @@ class Paint:
             # The painting itself beside it, for «Оригинал» at its end.
             original = downloaded_original(item["qid"])
             if not os.path.exists(original):
-                try:
-                    pixbuf_of(item["data"], LARGE, LARGE).savev(original + ".new", "jpeg",
-                                                                ["quality"], ["85"])
-                    os.replace(original + ".new", original)
-                except (GLib.Error, OSError) as exc:
-                    sys.stderr.write("haltia-paint: %s: %s\n" % (original, exc))
+                def save_original():
+                    try:
+                        pixbuf_of(item["data"], LARGE, LARGE).savev(original + ".new", "jpeg",
+                                                                    ["quality"], ["85"])
+                        os.replace(original + ".new", original)
+                    except (GLib.Error, OSError) as exc:
+                        sys.stderr.write("haltia-paint: %s: %s\n" % (original, exc))
+                self.pool.submit(save_original)
             self.gallery_stale = True
             if "info" in item:
                 item["info"].set_text("✓ Уже в раскрасках")
@@ -3151,6 +3212,16 @@ class Paint:
 
     # board
     def open(self, pic):
+        # Parse and construct first: a broken file must leave the current page intact.
+        # A copy: the gallery's thread may read and drop its regions meanwhile.
+        pic = without_regions(pic)
+        try:
+            board = Board(self, pic)
+        except (OSError, EOFError, ET.ParseError, ValueError, TypeError,
+                AttributeError, IndexError, KeyError, cairo.Error) as exc:
+            sys.stderr.write("haltia-paint: %s: %s\n" % (pic["path"], exc))
+            dialogs.info(self.win, "Эту раскраску не открыть.")
+            return False
         self.leave_preview()
         write_last(pic["id"])
         self.back_button.show()
@@ -3162,10 +3233,7 @@ class Paint:
             self.stack.remove(old)
         if self.board:
             self.board.stop()
-        # A copy: the gallery's thread may read and drop this picture's
-        # regions for a thumbnail meanwhile.
-        pic = without_regions(pic)
-        self.board = Board(self, pic)
+        self.board = board
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         middle = Gtk.Box()
         box.pack_start(middle, True, True, 0)
@@ -3232,6 +3300,8 @@ class Paint:
         if not any(self.board.left(n) for n in range(len(pic["palette"]))):
             # Opened from Готовые: its end, without the sound and replay.
             self.finished(celebrate=False)
+
+        return True
 
     def tool(self, name, action):
         """A button with a drawn icon, white on blue while it is on; "find"
@@ -3507,16 +3577,31 @@ class Paint:
 
     def original_shown(self, on):
         """The painting itself in place of the picture, or the picture."""
-        pb = None
-        if on and self.original_path:
+        self.original_request = request = object()
+        board = self.board
+
+        def loaded(pb):
+            if self.original_request is request and self.board is board:
+                board.set_original(pb)
+                if self.original_path:
+                    ctx = self.original_button.get_style_context()
+                    (ctx.add_class if pb else ctx.remove_class)("on")
+            return False
+
+        if not on or not self.original_path:
+            loaded(None)
+            return
+        path = self.original_path
+
+        def work():
             try:
-                pb = GdkPixbuf.Pixbuf.new_from_file_at_size(self.original_path, 1600, 1600)
-            except GLib.Error as exc:
-                sys.stderr.write("haltia-paint: %s: %s\n" % (self.original_path, exc))
-        self.board.set_original(pb)
-        if self.original_path:
-            ctx = self.original_button.get_style_context()
-            (ctx.add_class if pb else ctx.remove_class)("on")
+                pb = pixbuf_file(path, 1600, 1600)
+            except (OSError, GLib.Error) as exc:
+                sys.stderr.write("haltia-paint: %s: %s\n" % (path, exc))
+                pb = None
+            GLib.idle_add(loaded, pb)
+
+        self.pool.submit(work)
 
     def save_to_gallery(self, pic):
         """The finished picture as a PNG among the pictures (Галерея shows

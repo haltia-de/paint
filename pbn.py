@@ -45,6 +45,9 @@ from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps
 from scipy import ndimage
 from scipy.cluster.vq import kmeans2, vq
 
+# Accept ordinary camera photos, but bound full decodes of other formats.
+Image.MAX_IMAGE_PIXELS = 64_000_000
+
 # Long side of the region map in pixels; SVG coordinates are in these.
 SIDE = 1000
 # Levels: at most so many regions, of at most so many colours; speckles
@@ -95,15 +98,17 @@ def shrink(img, side, crop=None):
     """The picture (cut to crop, fractions x0 y0 x1 y1, if given) without
     its even margin, a little brighter, shrunk to side along its long
     edge: an (h, w, 3) byte array."""
+    if img.width * img.height > Image.MAX_IMAGE_PIXELS:
+        raise ValueError("too many image pixels")
+    img.draft("RGB", (3 * side, 3 * side))
+    # Shrink before transpose and RGB conversion, which both copy pixels.
+    if max(img.size) > 3 * side:
+        img.thumbnail((3 * side, 3 * side), Image.BILINEAR)
     img = ImageOps.exif_transpose(img).convert("RGB")
     if crop:
         w, h = img.size
         img = img.crop((round(crop[0] * w), round(crop[1] * h),
                         round(crop[2] * w), round(crop[3] * h)))
-    # Large photos: decoded smaller to begin with (JPEG draft), then cut
-    # down before the slower steps.
-    if max(img.size) > 3 * side:
-        img.thumbnail((3 * side, 3 * side), Image.BILINEAR)
     # An even margin (the paper round a drawing) is not part of it.
     corner = Image.new("RGB", img.size, img.getpixel((0, 0)))
     box = ImageChops.difference(img, corner).convert("L").point(lambda v: v > 24 and 255).getbbox()
