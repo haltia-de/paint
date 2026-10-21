@@ -553,7 +553,9 @@ def read_download(req, limit, cancelled=None):
                 raise OSError("download cancelled")
             # HTTPResponse.read1 makes at most one socket read. Set its
             # timeout to the remaining budget, rather than per-byte activity.
-            fh.fp.raw._sock.settimeout(min(remaining, 20))
+            sock = getattr(getattr(getattr(fh, "fp", None), "raw", None), "_sock", None)
+            if sock is not None:
+                sock.settimeout(min(remaining, 20))
             chunk = fh.read1(min(65536, limit - size))
             if time.monotonic() >= deadline:
                 raise TimeoutError("download deadline exceeded")
@@ -2789,6 +2791,10 @@ class Paint:
         self.find_button.hide()
         self.settings_button.hide()
         self.stack.set_visible_child_name("search")
+        if self.search_cancel.is_set():
+            self.search_cancel = threading.Event()
+            for child in self.results.get_children():
+                child.get_child().load_thumbnail()
         # No focus in the entry: the keyboard would cover the topics.
         self.win.set_focus(None)
 
@@ -2865,6 +2871,8 @@ class Paint:
 
     def search_more(self):
         if self.search_next is not None:
+            if self.search_cancel.is_set():
+                self.search_cancel = threading.Event()
             self.more_button.hide()
             self.search_note.set_text("Ищу ещё…")
             self.run_search(self.search_gen, self.search_query, self.search_next)
@@ -2932,20 +2940,27 @@ class Paint:
         button.add(inner)
         button.connect("clicked", lambda _b: self.show_preview(item))
 
-        cancelled = self.search_cancel
-
-        def load():
-            try:
-                pb = pixbuf_of(fetch_image(item["thumb"], cancelled), 300, 210)
-            except Exception:
+        def load_thumbnail():
+            if "small" in item:
+                image.set_from_pixbuf(item["small"])
                 return
-            if cancelled.is_set():
-                return
-            item["small"] = pb
-            GLib.idle_add(lambda: not cancelled.is_set() and gen == self.search_gen
-                          and image.set_from_pixbuf(pb) and False)
+            cancelled = self.search_cancel
 
-        self.search_pool.submit(load, cancelled=cancelled)
+            def load():
+                try:
+                    pb = pixbuf_of(fetch_image(item["thumb"], cancelled), 300, 210)
+                except Exception:
+                    return
+                if cancelled.is_set():
+                    return
+                item["small"] = pb
+                GLib.idle_add(lambda: not cancelled.is_set() and gen == self.search_gen
+                              and image.set_from_pixbuf(pb) and False)
+
+            self.search_pool.submit(load, cancelled=cancelled)
+
+        button.load_thumbnail = load_thumbnail
+        load_thumbnail()
         return button
 
     def show_preview(self, item):
@@ -3677,6 +3692,7 @@ class Paint:
 
         def work():
             temporary = None
+            text = "Не удалось сохранить."
             try:
                 os.makedirs(folder, exist_ok=True)
                 path = os.path.join(folder, name + ".png")
@@ -3688,19 +3704,22 @@ class Paint:
                 full = [hex_rgb(c) for c in own["palette"]]
                 regs = regions_of(own)
                 image = whole_picture(own, 2000, 2000, lambda i: full[regs[i].n])
-                with tempfile.NamedTemporaryFile(dir=folder, suffix=".png", delete=False) as fh:
+                with tempfile.NamedTemporaryFile(dir=folder, prefix=".",
+                                                 suffix=".png", delete=False) as fh:
                     temporary = fh.name
                 image.write_to_png(temporary)
                 os.replace(temporary, path)
                 text = "Сохранено в Галерею:\n%s" % os.path.join(os.path.basename(folder),
                                                                  os.path.basename(path))
-            except (OSError, cairo.Error) as exc:
+            except Exception as exc:
                 sys.stderr.write("haltia-paint: %s: %s\n" % (folder, exc))
                 text = "Не удалось сохранить."
             finally:
-                if temporary and os.path.exists(temporary):
-                    os.unlink(temporary)
-            GLib.idle_add(finished, text)
+                try:
+                    if temporary and os.path.exists(temporary):
+                        os.unlink(temporary)
+                finally:
+                    GLib.idle_add(finished, text)
 
         threading.Thread(target=work, daemon=True).start()
 

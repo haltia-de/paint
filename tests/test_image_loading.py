@@ -136,6 +136,15 @@ class ImageLoadingTest(unittest.TestCase):
         self.assertEqual(response.read1.call_count, 2)
         response.__exit__.assert_called_once()
 
+    def test_download_without_private_socket_attribute(self):
+        response = io.BytesIO(b'image')
+        response.geturl = lambda: 'https://example.invalid/image'
+        ns = functions('read_download', namespace={
+            'time': SimpleNamespace(monotonic=lambda: 0)})
+        with patch('urllib.request.urlopen', return_value=response):
+            self.assertEqual(ns['read_download'](object(), 100),
+                             (b'image', 'https://example.invalid/image'))
+
     def test_cancelled_thumbnail_jobs_do_not_block_user_pool(self):
         import queue
         import threading
@@ -174,7 +183,11 @@ class ImageLoadingTest(unittest.TestCase):
         threads = []
         callbacks = []
         image = Mock()
-        image.write_to_png.side_effect = lambda path: Path(path).write_bytes(b'png')
+        def write_png(path):
+            self.assertTrue(Path(path).name.startswith('.'))
+            Path(path).write_bytes(b'png')
+
+        image.write_to_png.side_effect = write_png
         with tempfile.TemporaryDirectory() as folder:
             ns = functions('save_to_gallery', namespace={
                 'SAVED': folder, 're': re, 'os': os, 'time': time,
@@ -183,7 +196,8 @@ class ImageLoadingTest(unittest.TestCase):
                 'threading': SimpleNamespace(Thread=lambda **kw: SimpleNamespace(
                     start=lambda: threads.append(kw['target']))),
                 'GLib': SimpleNamespace(idle_add=lambda *args: callbacks.append(args)),
-                'dialogs': Mock(), 'cairo': SimpleNamespace(Error=RuntimeError)})
+                'dialogs': Mock(), 'sys': SimpleNamespace(stderr=io.StringIO()),
+                'cairo': SimpleNamespace(Error=RuntimeError)})
             app = SimpleNamespace(saving=False, win=object())
             pic = {'name': 'Я' * 300, 'palette': []}
             ns['save_to_gallery'](app, pic)
@@ -197,6 +211,63 @@ class ImageLoadingTest(unittest.TestCase):
             callback, text = callbacks.pop()
             callback(text)
             self.assertFalse(app.saving)
+            image.write_to_png.side_effect = ValueError('unexpected render failure')
+            ns['save_to_gallery'](app, pic)
+            threads.pop()()
+            callback, text = callbacks.pop()
+            callback(text)
+            self.assertFalse(app.saving)
+            self.assertEqual(text, 'Не удалось сохранить.')
+            self.assertEqual(list(Path(folder).iterdir()), files)
+
+    def test_return_to_search_restarts_cancelled_thumbnails(self):
+        import threading
+        ns = functions('show_search', 'search_more', namespace={'threading': threading})
+        button = Mock()
+        stack = Mock()
+        stack.get_child_by_name.return_value = None
+        cancelled = threading.Event()
+        cancelled.set()
+        app = SimpleNamespace(
+            search_page=object(), leave_preview=Mock(), stack=stack,
+            title=Mock(), back_button=Mock(), find_button=Mock(), settings_button=Mock(),
+            win=Mock(), search_cancel=cancelled,
+            results=SimpleNamespace(get_children=lambda: [SimpleNamespace(
+                get_child=lambda: button)]), more_button=Mock(), search_note=Mock(),
+            search_next=24, search_gen=1, search_query='cats', run_search=Mock())
+        ns['show_search'](app)
+        self.assertIsNot(app.search_cancel, cancelled)
+        self.assertFalse(app.search_cancel.is_set())
+        button.load_thumbnail.assert_called_once()
+        app.search_cancel.set()
+        ns['search_more'](app)
+        self.assertFalse(app.search_cancel.is_set())
+        app.run_search.assert_called_once_with(1, 'cats', 24)
+
+    def test_thumbnail_retry_uses_fresh_event_and_cached_image(self):
+        import threading
+        gtk = Mock()
+        ns = functions('result_card', namespace={
+            'Gtk': gtk, 'Pango': Mock(), 'downloaded_any': lambda qid: False,
+            'pixbuf_of': lambda *args: 'pixels', 'fetch_image': Mock(return_value=b'png'),
+            'GLib': SimpleNamespace(idle_add=lambda callback: callback())})
+        app = SimpleNamespace(search_cancel=threading.Event(), search_pool=Mock(),
+                              search_gen=1)
+        item = dict(title='Cat', author='', year=None, qid='Q1', thumb='url')
+        button = ns['result_card'](app, 1, item)
+        job = app.search_pool.submit.call_args.args[0]
+        app.search_cancel.set()
+        job()
+        self.assertNotIn('small', item)
+        app.search_cancel = threading.Event()
+        button.load_thumbnail()
+        self.assertIs(app.search_pool.submit.call_args.kwargs['cancelled'], app.search_cancel)
+        app.search_pool.submit.call_args.args[0]()
+        self.assertEqual(item['small'], 'pixels')
+        app.search_pool.reset_mock()
+        button.load_thumbnail()
+        app.search_pool.submit.assert_not_called()
+        gtk.Image.return_value.set_from_pixbuf.assert_called_with('pixels')
 
     def test_corrupt_regions_are_io_errors_and_not_cached(self):
         ns = functions('regions_of', 'read_regions', namespace={
