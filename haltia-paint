@@ -477,8 +477,10 @@ def read_regions(pic):
             cr.new_path()
             for ring in el.get("d").split("M")[1:]:
                 v = [float(t) for t in ring.rstrip("Z").split()]
-                if len(v) < 6 or len(v) % 2 or not all(math.isfinite(t) for t in v):
+                if len(v) % 2 or not all(math.isfinite(t) for t in v):
                     raise ValueError("invalid region outline")
+                if len(v) < 6:
+                    continue
                 cr.move_to(v[0], v[1])
                 for i in range(2, len(v), 2):
                     cr.line_to(v[i], v[i + 1])

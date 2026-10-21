@@ -3,6 +3,7 @@
 import ast
 import gzip
 import io
+import math
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -26,6 +27,50 @@ def functions(*names, namespace):
 
 
 class ImageLoadingTest(unittest.TestCase):
+    def region_parser(self):
+        # Only path validation is under test; drawing needs no GTK or cairo.
+        context = SimpleNamespace(
+            new_path=lambda: None, move_to=Mock(), line_to=lambda x, y: None,
+            close_path=lambda: None, copy_path=lambda: (), append_path=lambda path: None,
+            path_extents=lambda: (0, 0, 10, 10))
+        ns = functions('regions_of', 'read_regions', namespace={
+            'gzip': gzip, 'ET': ET, 'math': math, 'Region': SimpleNamespace,
+            'SVG': '{http://www.w3.org/2000/svg}', 'GRID': 100,
+            'cairo': SimpleNamespace(Error=RuntimeError, Context=lambda surface: context,
+                                     ImageSurface=Mock(), FORMAT_A8=0)})
+        return ns['regions_of'], context
+
+    def test_every_bundled_picture_loads_regions(self):
+        regions_of, _ = self.region_parser()
+        paths = sorted((Path(__file__).resolve().parents[1] / 'pictures').glob('*.svgz'))
+        self.assertTrue(paths)
+        for path in paths:
+            with self.subTest(picture=path.name):
+                with gzip.open(path) as fh:
+                    head = ET.parse(fh).getroot().attrib
+                pic = {'path': path, 'palette': head['data-palette'].split(),
+                       'count': int(head['data-count'])}
+                self.assertEqual(len(regions_of(pic)), pic['count'])
+                self.assertIn('grid', pic)
+
+    def test_short_rings_are_skipped_but_invalid_coordinates_fail(self):
+        for ring in ('', '1 2', '1 2 3 4', '1', '1 2 3', 'nan 0', 'inf 0', 'bad 0'):
+            with self.subTest(ring=ring), tempfile.TemporaryDirectory() as folder:
+                regions_of, context = self.region_parser()
+                path = Path(folder) / 'picture.svgz'
+                with gzip.open(path, 'wt') as fh:
+                    fh.write('<svg xmlns="http://www.w3.org/2000/svg">'
+                             '<path data-n="1" data-label="1 1 1" '
+                             'd="M%sZM0 0 10 0 0 10Z"/></svg>' % ring)
+                pic = {'path': path, 'palette': ['#ffffff'], 'count': 1}
+                if ring in ('', '1 2', '1 2 3 4'):
+                    self.assertEqual(len(regions_of(pic)), 1)
+                    context.move_to.assert_called_once_with(0, 0)
+                else:
+                    with self.assertRaises(OSError):
+                        regions_of(pic)
+                    self.assertNotIn('regions', pic)
+
     def test_file_pixel_cap_precedes_decode(self):
         pixbuf = Mock()
         pixbuf.get_file_info.return_value = (object(), 10000, 10000)
