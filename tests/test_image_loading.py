@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import xml.etree.ElementTree as ET
 
 
@@ -75,7 +75,8 @@ class ImageLoadingTest(unittest.TestCase):
         pixbuf = Mock()
         pixbuf.get_file_info.return_value = (object(), 10000, 10000)
         ns = functions('pixbuf_file', namespace={
-            'GdkPixbuf': SimpleNamespace(Pixbuf=pixbuf), 'MAX_IMAGE_PIXELS': 64_000_000})
+            'GdkPixbuf': SimpleNamespace(Pixbuf=pixbuf), 'MAX_IMAGE_PIXELS': 64_000_000,
+            'open': lambda *args: io.BytesIO(b'jpeg'), 'check_png_header': lambda data: None})
         with self.assertRaises(OSError):
             ns['pixbuf_file']('huge.png', 640, 520)
         pixbuf.new_from_file_at_scale.assert_not_called()
@@ -98,12 +99,104 @@ class ImageLoadingTest(unittest.TestCase):
         loader = Loader()
         ns = functions('pixbuf_of', namespace={
             'GdkPixbuf': SimpleNamespace(PixbufLoader=lambda: loader),
-            'MAX_IMAGE_PIXELS': 64_000_000})
+            'MAX_IMAGE_PIXELS': 64_000_000, 'check_png_header': lambda data: None})
         ns['pixbuf_of']((8000, 6000), 640, 520)
         loader.set_size.assert_called_with(640, 480)
         with self.assertRaises(OSError):
             ns['pixbuf_of']((10000, 10000), 640, 520)
         loader.set_size.assert_called_with(1, 1)
+
+    def test_png_cap_precedes_any_decoder(self):
+        pixbuf = Mock()
+        ns = functions('check_png_header', 'pixbuf_file', 'pixbuf_of', namespace={
+            'GdkPixbuf': pixbuf, 'MAX_IMAGE_PIXELS': 64_000_000})
+        header = (b'\x89PNG\r\n\x1a\n' + (13).to_bytes(4, 'big') + b'IHDR'
+                  + (10000).to_bytes(4, 'big') * 2)
+        with tempfile.NamedTemporaryFile() as fh:
+            fh.write(header)
+            fh.flush()
+            with self.assertRaises(OSError):
+                ns['pixbuf_file'](fh.name, 100, 100)
+        with self.assertRaises(OSError):
+            ns['pixbuf_of'](header, 100, 100)
+        self.assertEqual(pixbuf.mock_calls, [])
+        ns['check_png_header'](header[:16] + (8000).to_bytes(4, 'big') * 2)
+
+    def test_download_deadline_stops_trickling_response(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read1.return_value = b'x'
+        clock = Mock()
+        clock.monotonic.side_effect = [0, 1, 30, 31, 61]
+        ns = functions('read_download', namespace={'time': clock})
+        with patch('urllib.request.urlopen', return_value=response):
+            with self.assertRaises(TimeoutError):
+                ns['read_download'](object(), 100)
+        self.assertEqual(response.read1.call_count, 2)
+        response.__exit__.assert_called_once()
+
+    def test_cancelled_thumbnail_jobs_do_not_block_user_pool(self):
+        import queue
+        import threading
+        node = next(n for n in SOURCE.body if isinstance(n, ast.ClassDef)
+                    and n.name == 'Workers')
+        ns = {'queue': queue, 'threading': threading,
+              'sys': SimpleNamespace(stderr=io.StringIO())}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), 'haltia-paint', 'exec'), ns)
+        thumbs, users = ns['Workers'](1), ns['Workers'](1)
+        entered, release, done = threading.Event(), threading.Event(), threading.Event()
+        cancelled = threading.Event()
+        stale = Mock()
+
+        def slow():
+            entered.set()
+            release.wait(2)
+
+        thumbs.submit(slow)
+        self.assertTrue(entered.wait(2))
+        thumbs.submit(stale, cancelled=cancelled)
+        cancelled.set()
+        try:
+            users.submit(done.set)
+            self.assertTrue(done.wait(2))
+        finally:
+            release.set()
+        drained = threading.Event()
+        thumbs.submit(drained.set)
+        self.assertTrue(drained.wait(2))
+        stale.assert_not_called()
+
+    def test_double_save_and_long_unicode_title(self):
+        import os
+        import re
+        import time
+        threads = []
+        callbacks = []
+        image = Mock()
+        image.write_to_png.side_effect = lambda path: Path(path).write_bytes(b'png')
+        with tempfile.TemporaryDirectory() as folder:
+            ns = functions('save_to_gallery', namespace={
+                'SAVED': folder, 're': re, 'os': os, 'time': time,
+                'tempfile': tempfile, 'without_regions': dict, 'hex_rgb': str,
+                'regions_of': lambda pic: [], 'whole_picture': lambda *args: image,
+                'threading': SimpleNamespace(Thread=lambda **kw: SimpleNamespace(
+                    start=lambda: threads.append(kw['target']))),
+                'GLib': SimpleNamespace(idle_add=lambda *args: callbacks.append(args)),
+                'dialogs': Mock(), 'cairo': SimpleNamespace(Error=RuntimeError)})
+            app = SimpleNamespace(saving=False, win=object())
+            pic = {'name': 'Я' * 300, 'palette': []}
+            ns['save_to_gallery'](app, pic)
+            ns['save_to_gallery'](app, pic)
+            self.assertEqual(len(threads), 1)
+            threads.pop()()
+            files = list(Path(folder).iterdir())
+            self.assertEqual(len(files), 1)
+            self.assertLess(len(files[0].name.encode()), 120)
+            self.assertEqual(files[0].read_bytes(), b'png')
+            callback, text = callbacks.pop()
+            callback(text)
+            self.assertFalse(app.saving)
 
     def test_corrupt_regions_are_io_errors_and_not_cached(self):
         ns = functions('regions_of', 'read_regions', namespace={

@@ -112,6 +112,8 @@ own pictures among Мои фотографии) and opens it; "✕ Убрать"
 takes it out again. Only https requests to
 wikidata.org, commons.wikimedia.org and the Wikimedia image hosts are
 made.
+Downloads have a 60-second deadline; search thumbnails use their own two
+workers, with stale jobs cancelled when leaving the page or changing the query.
 Photos and originals are decoded at display size in the worker pool;
 source images above 64 million pixels are rejected. A broken picture
 leaves the current page intact, and startup falls back to the gallery.
@@ -128,6 +130,7 @@ import re
 import shutil
 import signal
 import sys
+import tempfile
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -536,17 +539,41 @@ def regions_in(pic, x0, y0, x1, y1):
                   and regions[i].box[1] <= y1 and regions[i].box[3] >= y0)
 
 
+def read_download(req, limit, cancelled=None):
+    """Bound the whole transfer, including a server trickling bytes."""
+    import urllib.request
+    deadline = time.monotonic() + 60
+    with urllib.request.urlopen(req, timeout=20) as fh:
+        chunks, size = [], 0
+        while size < limit:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("download deadline exceeded")
+            if cancelled is not None and cancelled.is_set():
+                raise OSError("download cancelled")
+            # HTTPResponse.read1 makes at most one socket read. Set its
+            # timeout to the remaining budget, rather than per-byte activity.
+            fh.fp.raw._sock.settimeout(min(remaining, 20))
+            chunk = fh.read1(min(65536, limit - size))
+            if time.monotonic() >= deadline:
+                raise TimeoutError("download deadline exceeded")
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        return b"".join(chunks), fh.geturl()
+
+
 def api(url, params):
     params = dict(params, format="json", formatversion="2")
     import urllib.parse  # only for searching: a fifth of a second at start
     import urllib.request
     req = urllib.request.Request(url + "?" + urllib.parse.urlencode(params),
                                  headers={"User-Agent": AGENT})
-    with urllib.request.urlopen(req, timeout=20) as fh:
-        return json.loads(fh.read(4_000_000))
+    return json.loads(read_download(req, 4_000_000)[0])
 
 
-def fetch_image(url):
+def fetch_image(url, cancelled=None):
     """Image bytes, only over https from the Wikimedia image hosts."""
     import urllib.parse
     import urllib.request
@@ -557,10 +584,10 @@ def fetch_image(url):
     if not allowed(url):
         raise ValueError("not a Wikimedia image: %r" % url)
     req = urllib.request.Request(url, headers={"User-Agent": AGENT})
-    with urllib.request.urlopen(req, timeout=30) as fh:
-        if not allowed(fh.geturl()):
-            raise ValueError("redirected away: %r" % fh.geturl())
-        return fh.read(8_000_000)
+    data, final_url = read_download(req, 8_000_000, cancelled)
+    if not allowed(final_url):
+        raise ValueError("redirected away: %r" % final_url)
+    return data
 
 
 def label_of(entity):
@@ -664,8 +691,21 @@ def search_paintings(query, offset=0):
 MAX_IMAGE_PIXELS = 64_000_000
 
 
+def check_png_header(data):
+    """Reject oversized PNGs before gdk-pixbuf allocates their pixels."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        if len(data) < 24 or data[12:16] != b"IHDR":
+            raise OSError("invalid PNG header")
+        w = int.from_bytes(data[16:20], "big")
+        h = int.from_bytes(data[20:24], "big")
+        if not w or not h or w * h > MAX_IMAGE_PIXELS:
+            raise OSError("too many image pixels")
+
+
 def pixbuf_file(path, width, height):
     """Decode a local image at display size, with a cap on source pixels."""
+    with open(path, "rb") as fh:
+        check_png_header(fh.read(24))
     info = GdkPixbuf.Pixbuf.get_file_info(path)
     if not info or not info[0] or not 0 < info[1] * info[2] <= MAX_IMAGE_PIXELS:
         raise OSError("invalid image or too many image pixels")
@@ -674,6 +714,7 @@ def pixbuf_file(path, width, height):
 
 def pixbuf_of(data, width, height):
     """Image bytes decoded to fit width x height, with bounded pixels."""
+    check_png_header(data)
     loader = GdkPixbuf.PixbufLoader()
     oversized = []
 
@@ -2048,14 +2089,15 @@ class Workers:
         for _ in range(count):
             threading.Thread(target=self.work, daemon=True).start()
 
-    def submit(self, fn, *args):
-        self.jobs.put((fn, args))
+    def submit(self, fn, *args, cancelled=None):
+        self.jobs.put((fn, args, cancelled))
 
     def work(self):
         while True:
-            fn, args = self.jobs.get()
+            fn, args, cancelled = self.jobs.get()
             try:
-                fn(*args)
+                if cancelled is None or not cancelled.is_set():
+                    fn(*args)
             except Exception as exc:  # one job must not stop the thread
                 sys.stderr.write("haltia-paint: %s\n" % exc)
 
@@ -2110,6 +2152,11 @@ class Paint:
         self.swatches = []
         self.search_page = None
         self.search_gen = 0
+        self.search_cancel = threading.Event()
+        self.stack.connect("notify::visible-child-name",
+                           lambda stack, _prop: self.search_cancel.set()
+                           if stack.get_visible_child_name() != "search" else None)
+        self.saving = False
         self.preview_item = None
         # Настройки: how the chosen number's regions stand out.
         self.settings = Settings("paint")
@@ -2142,6 +2189,7 @@ class Paint:
         # The kind of picture a preview makes, kept from one to the next.
         self.big_numbers, self.ink = True, 0
         self.pool = Workers(3)
+        self.search_pool = Workers(2)
         # pbn.py, one at a time: previews first, then photos (Преобразование).
         self.conversion = Conversion(PBN, notify=GLib.idle_add)
         self.photo_jobs = {}  # photo path -> its job
@@ -2797,6 +2845,8 @@ class Paint:
         self.on_search(self.search)
 
     def on_search(self, entry):
+        self.search_cancel.set()
+        self.search_cancel = threading.Event()
         text = entry.get_text().strip()
         self.search_gen += 1
         gen = self.search_gen
@@ -2882,15 +2932,20 @@ class Paint:
         button.add(inner)
         button.connect("clicked", lambda _b: self.show_preview(item))
 
+        cancelled = self.search_cancel
+
         def load():
             try:
-                pb = pixbuf_of(fetch_image(item["thumb"]), 300, 210)
+                pb = pixbuf_of(fetch_image(item["thumb"], cancelled), 300, 210)
             except Exception:
                 return
+            if cancelled.is_set():
+                return
             item["small"] = pb
-            GLib.idle_add(lambda: gen == self.search_gen and image.set_from_pixbuf(pb) and False)
+            GLib.idle_add(lambda: not cancelled.is_set() and gen == self.search_gen
+                          and image.set_from_pixbuf(pb) and False)
 
-        self.pool.submit(load)
+        self.search_pool.submit(load, cancelled=cancelled)
         return button
 
     def show_preview(self, item):
@@ -3606,10 +3661,22 @@ class Paint:
     def save_to_gallery(self, pic):
         """The finished picture as a PNG among the pictures (Галерея shows
         it), drawn in a thread: a large one takes a few seconds."""
+        if self.saving:
+            return
+        self.saving = True
         folder = SAVED
         name = re.sub(r'[/\\:*?"<>|]', " ", pic["name"]).strip() or "Раскраска"
 
+        name = name.encode("utf-8")[:100].decode("utf-8", "ignore")
+        name += time.strftime(" %Y-%m-%d")
+
+        def finished(text):
+            self.saving = False
+            dialogs.info(self.win, text)
+            return False
+
         def work():
+            temporary = None
             try:
                 os.makedirs(folder, exist_ok=True)
                 path = os.path.join(folder, name + ".png")
@@ -3621,14 +3688,19 @@ class Paint:
                 full = [hex_rgb(c) for c in own["palette"]]
                 regs = regions_of(own)
                 image = whole_picture(own, 2000, 2000, lambda i: full[regs[i].n])
-                image.write_to_png(path + ".new")
-                os.replace(path + ".new", path)
+                with tempfile.NamedTemporaryFile(dir=folder, suffix=".png", delete=False) as fh:
+                    temporary = fh.name
+                image.write_to_png(temporary)
+                os.replace(temporary, path)
                 text = "Сохранено в Галерею:\n%s" % os.path.join(os.path.basename(folder),
                                                                  os.path.basename(path))
             except (OSError, cairo.Error) as exc:
                 sys.stderr.write("haltia-paint: %s: %s\n" % (folder, exc))
                 text = "Не удалось сохранить."
-            GLib.idle_add(lambda: dialogs.info(self.win, text) and False)
+            finally:
+                if temporary and os.path.exists(temporary):
+                    os.unlink(temporary)
+            GLib.idle_add(finished, text)
 
         threading.Thread(target=work, daemon=True).start()
 
