@@ -4,7 +4,7 @@ Name=Colouring
 Name[ru]=Раскраска
 Comment=Colour by number on paintings and prints
 Comment[ru]=Раскраска по номерам на известных картинах
-Exec=haltia-paint
+Exec=haltia-paint %f
 Icon=io.github.haltia_de.Paint
 Terminal=false
 Categories=GTK;Game;LogicGame;
@@ -16,3 +16,5 @@ X-B8K-Home=true
 # stays off while it is in front (haltia-shell 2.8).
 X-Haltia-Own-Feedback=true
 X-B8K-Replaces=paint;io.github.trudenboy.Paint;
+X-Haltia-Share=true
+MimeType=image/jpeg;image/png;image/webp;

@@ -92,7 +92,9 @@ it is already in use, their thumbnails drawn in a thread.
 New pictures: "+ Добавить" in the gallery header offers a picture of
 one's own (those in the Pictures folder, Изображения, newest first, and
 "Другая папка…": the desktop's file chooser, the portal in a Flatpak;
-what was chosen there comes first next time) or a search: it searches
+what was chosen there comes first next time). A photo sent by another program
+or given on the command line opens the same preview, from a private copy
+so changes in the sending program do not affect it. Or a search: it searches
 Wikidata for
 paintings (items that are an instance of painting and have an image), by
 artist, title or what is painted, in Russian as well; the pictures
@@ -767,6 +769,24 @@ def downloaded_any(qid):
         return any(f.startswith(qid + "-") for f in os.listdir(DOWNLOADED))
     except OSError:
         return False
+
+
+def keep_shared_photo(path, data):
+    """Keep a bounded snapshot before decoding or converting a shared photo."""
+    folder = os.path.join(DATA, "shared")
+    os.makedirs(folder, exist_ok=True)
+    name = hashlib.sha256(data).hexdigest() + os.path.splitext(path)[1].lower()
+    target = os.path.join(folder, name)
+    with tempfile.NamedTemporaryFile(dir=folder, delete=False) as fh:
+        temporary = fh.name
+        try:
+            fh.write(data)
+            fh.close()
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    return target
 
 
 def photo_path(path):
@@ -2750,7 +2770,7 @@ class Paint:
             card.show_all()
         self.photo_chosen(path)
 
-    def photo_chosen(self, path):
+    def photo_chosen(self, path, shared=False):
         self.photo_request = request = object()
         page = self.stack.get_visible_child()
 
@@ -2767,15 +2787,16 @@ class Paint:
                 st = os.stat(path)
                 if st.st_size > 40_000_000:
                     raise OSError("too large")
-                large = pixbuf_file(path, 640, 520)
                 with open(path, "rb") as fh:
                     data = fh.read(40_000_001)
                 if len(data) > 40_000_000:
                     raise OSError("too large")
+                source = keep_shared_photo(path, data) if shared else path
+                large = pixbuf_file(source, 640, 520)
                 key = hashlib.sha1(("%s|%d|%d" % (path, st.st_size, st.st_mtime)).encode()).hexdigest()
                 item = {"qid": "own-" + key[:12],
                         "title": os.path.splitext(os.path.basename(path))[0],
-                        "author": "", "year": None, "file": path, "data": data,
+                        "author": "", "year": None, "file": source, "data": data,
                         "theme": sections.MY_PHOTOS, "large": large, "own": True}
             except (OSError, GLib.Error) as exc:
                 sys.stderr.write("haltia-paint: %s: %s\n" % (path, exc))
@@ -4038,9 +4059,19 @@ class App(Gtk.Application):
     """One window: starting the program again shows the one there is."""
 
     def __init__(self, open_id=None):
-        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_OPEN)
         self.open_id = open_id
         self.paint = None
+
+    def do_open(self, files, _n_files, _hint):
+        self.do_activate()
+        # The desktop entry accepts one photo (%f).
+        if files:
+            path = files[0].get_path()
+            if path is None:
+                dialogs.info(self.paint.win, "Эту картинку не открыть.")
+            else:
+                self.paint.photo_chosen(path, shared=True)
 
     def do_activate(self):
         if self.paint:
@@ -4064,7 +4095,7 @@ def main():
     # The folders of versions before 4.0, b8k-paint: the pictures made,
     # the progress and the thumbnails move to the new name once.
     paths.migrate_dirs("b8k-paint", "haltia-paint")
-    return App(open_id).run(sys.argv[:1])
+    return App(open_id).run(sys.argv[:1] if open_id else sys.argv)
 
 
 if __name__ == "__main__":
