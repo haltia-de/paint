@@ -1,5 +1,21 @@
 # Что нового · What's new
 
+## 4.8.0 (2026-10-22)
+
+### Русский
+
+- Готовую картину можно «Отправить» в другую программу, например в «Сообщения».
+- Фотография, отправленная из «Камеры» или «Галереи», открывается как новая раскраска.
+- Поиск не задерживается из-за зависших загрузок; при возвращении к результатам миниатюры загружаются снова.
+- Повторные нажатия «Сохранить в Галерею» больше не запускают несколько сохранений одновременно; картины с длинными названиями тоже сохраняются.
+
+### English
+
+- A finished picture can be sent to another program, such as Messages, with «Отправить» (Send).
+- A photo sent from Camera or Gallery opens as a new colouring.
+- Search is no longer held up by stalled downloads; thumbnails load again when returning to the results.
+- Repeated taps on «Сохранить в Галерею» (Save to Gallery) no longer start several saves at once; pictures with long titles can be saved too.
+
 ## 4.7.4 (2026-10-21)
 
 ### Русский
