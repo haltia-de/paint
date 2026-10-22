@@ -157,7 +157,7 @@ from haltia_kit import dialogs, paths  # noqa: E402
 from haltia_kit.settings import Settings  # noqa: E402
 
 try:
-    from haltia_kit import share
+    from haltia_kit import share  # noqa: E402
 except ImportError:
     share = None
 
@@ -3686,7 +3686,8 @@ class Paint:
     def save_to_gallery(self, pic, send=False):
         """The finished picture as a PNG among the pictures (Галерея shows
         it), drawn in a thread: a large one takes a few seconds. Optionally
-        open kit’s sharing chooser once the file is ready."""
+        open kit’s sharing chooser once the file is ready. Reuse the saved
+        file for this picture while it exists."""
         if self.saving:
             return
         self.saving = True
@@ -3698,11 +3699,20 @@ class Paint:
 
         def finished(text, path):
             self.saving = False
+            if path:
+                pic["saved_path"] = path
             if send and path and share is not None:
-                share.send(path)
+                share.send(path, self.win)
             else:
                 dialogs.info(self.win, text)
             return False
+
+        path = pic.get("saved_path")
+        if path and os.path.isfile(path):
+            text = "Сохранено в Галерею:\n%s" % os.path.join(os.path.basename(folder),
+                                                             os.path.basename(path))
+            finished(text, path)
+            return
 
         def work():
             temporary = None
