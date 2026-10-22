@@ -46,7 +46,8 @@ bottom has one big button per number. Pick a colour, tap its regions.
   again region by region in the order it was painted (some 8 s; a tap
   skips it; Настройки can leave it out), then «Готово!» and its buttons,
   no dialog: "Сохранить в Галерею" keeps it as a PNG in Изображения/Мои
-  раскраски, where Галерея (the photos program) shows it; «Посмотреть ещё
+  раскраски, where Галерея (the photos program) shows it; «Отправить»
+  saves it there and opens kit’s sharing chooser, if available; «Посмотреть ещё
   раз», «Оригинал» (the painting itself in its place: built-in ones'
   in originals/, a downloaded one's kept beside it, an own photo) and
   «К раскраскам». A finished picture opened again shows its end.
@@ -154,6 +155,12 @@ gi.require_version("GLibUnix", "2.0")
 gi.require_version("GdkPixbuf", "2.0")
 from haltia_kit import dialogs, paths  # noqa: E402
 from haltia_kit.settings import Settings  # noqa: E402
+
+try:
+    from haltia_kit import share  # noqa: E402
+except ImportError:
+    share = None
+
 from gi.repository import Gdk, GdkPixbuf, Gio, GLibUnix, Gtk, Pango  # noqa: E402
 
 # Installed as PREFIX/bin/haltia-paint: the pictures are in
@@ -3622,9 +3629,12 @@ class Paint:
         pic = self.board.pic
         self.original_path = original_of(pic)
         for label, action in (("Сохранить в Галерею", lambda: self.save_to_gallery(pic)),
+                              ("Отправить", lambda: self.save_to_gallery(pic, send=True)),
                               ("Посмотреть ещё раз", self.see_again),
                               ("Оригинал", self.flip_original),
                               ("К раскраскам", self.back)):
+            if label == "Отправить" and share is None:
+                continue
             if label == "Оригинал" and not self.original_path:
                 continue
             button = Gtk.Button(label=label)
@@ -3673,9 +3683,11 @@ class Paint:
 
         self.pool.submit(work)
 
-    def save_to_gallery(self, pic):
+    def save_to_gallery(self, pic, send=False):
         """The finished picture as a PNG among the pictures (Галерея shows
-        it), drawn in a thread: a large one takes a few seconds."""
+        it), drawn in a thread: a large one takes a few seconds. Optionally
+        open kit’s sharing chooser once the file is ready. Reuse the saved
+        file for this picture while it exists."""
         if self.saving:
             return
         self.saving = True
@@ -3685,13 +3697,26 @@ class Paint:
         name = name.encode("utf-8")[:100].decode("utf-8", "ignore")
         name += time.strftime(" %Y-%m-%d")
 
-        def finished(text):
+        def finished(text, path):
             self.saving = False
-            dialogs.info(self.win, text)
+            if path:
+                pic["saved_path"] = path
+            if send and path and share is not None:
+                share.send(path, self.win)
+            else:
+                dialogs.info(self.win, text)
             return False
+
+        path = pic.get("saved_path")
+        if path and os.path.isfile(path):
+            text = "Сохранено в Галерею:\n%s" % os.path.join(os.path.basename(folder),
+                                                             os.path.basename(path))
+            finished(text, path)
+            return
 
         def work():
             temporary = None
+            saved_path = None
             text = "Не удалось сохранить."
             try:
                 os.makedirs(folder, exist_ok=True)
@@ -3709,6 +3734,7 @@ class Paint:
                     temporary = fh.name
                 image.write_to_png(temporary)
                 os.replace(temporary, path)
+                saved_path = path
                 text = "Сохранено в Галерею:\n%s" % os.path.join(os.path.basename(folder),
                                                                  os.path.basename(path))
             except Exception as exc:
@@ -3719,7 +3745,7 @@ class Paint:
                     if temporary and os.path.exists(temporary):
                         os.unlink(temporary)
                 finally:
-                    GLib.idle_add(finished, text)
+                    GLib.idle_add(finished, text, saved_path)
 
         threading.Thread(target=work, daemon=True).start()
 
