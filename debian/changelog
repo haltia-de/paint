@@ -1,3 +1,12 @@
+haltia-paint (4.8.0) unstable; urgency=medium
+
+  * Send a finished picture to another program, such as Messages.
+  * Open a photo sent from Camera or Gallery as a new colouring.
+  * Bound stalled downloads and restart thumbnails on returning to search.
+  * Prevent simultaneous saves and support long picture titles.
+
+ -- Haltia <rensomail@gmail.com>  Thu, 22 Oct 2026 14:00:00 +0300
+
 haltia-paint (4.7.4) unstable; urgency=medium
 
   * Large photos are decoded at the size needed: choosing a photo or viewing
