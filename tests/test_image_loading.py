@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Image loading failures and worker hand-offs, without GTK."""
 import ast
+import builtins
 import gzip
 import io
 import math
@@ -196,7 +197,8 @@ class ImageLoadingTest(unittest.TestCase):
                 'threading': SimpleNamespace(Thread=lambda **kw: SimpleNamespace(
                     start=lambda: threads.append(kw['target']))),
                 'GLib': SimpleNamespace(idle_add=lambda *args: callbacks.append(args)),
-                'dialogs': Mock(), 'sys': SimpleNamespace(stderr=io.StringIO()),
+                'dialogs': Mock(), 'share': Mock(),
+                'sys': SimpleNamespace(stderr=io.StringIO()),
                 'cairo': SimpleNamespace(Error=RuntimeError)})
             app = SimpleNamespace(saving=False, win=object())
             pic = {'name': 'Я' * 300, 'palette': []}
@@ -208,17 +210,65 @@ class ImageLoadingTest(unittest.TestCase):
             self.assertEqual(len(files), 1)
             self.assertLess(len(files[0].name.encode()), 120)
             self.assertEqual(files[0].read_bytes(), b'png')
-            callback, text = callbacks.pop()
-            callback(text)
+            callback, text, path = callbacks.pop()
+            callback(text, path)
             self.assertFalse(app.saving)
-            image.write_to_png.side_effect = ValueError('unexpected render failure')
-            ns['save_to_gallery'](app, pic)
+            ns['dialogs'].info.reset_mock()
+            ns['save_to_gallery'](app, pic, send=True)
             threads.pop()()
-            callback, text = callbacks.pop()
-            callback(text)
+            ns['share'].send.assert_not_called()
+            callback, text, path = callbacks.pop()
+            self.assertEqual(Path(path).read_bytes(), b'png')
+            callback(text, path)
+            ns['share'].send.assert_called_once_with(path)
+            ns['dialogs'].info.assert_not_called()
+            files = list(Path(folder).iterdir())
+            ns['share'].send.reset_mock()
+            image.write_to_png.side_effect = ValueError('unexpected render failure')
+            ns['save_to_gallery'](app, pic, send=True)
+            threads.pop()()
+            callback, text, path = callbacks.pop()
+            callback(text, path)
             self.assertFalse(app.saving)
             self.assertEqual(text, 'Не удалось сохранить.')
+            ns['share'].send.assert_not_called()
+            ns['dialogs'].info.assert_called_once_with(app.win, text)
             self.assertEqual(list(Path(folder).iterdir()), files)
+
+    def test_optional_kit_share_import(self):
+        node = next(node for node in SOURCE.body if isinstance(node, ast.Try)
+                    and any(isinstance(child, ast.ImportFrom)
+                            and child.module == 'haltia_kit' for child in node.body))
+        code = compile(ast.Module(body=[node], type_ignores=[]), 'haltia-paint', 'exec')
+        for available in (False, True):
+            with self.subTest(available=available):
+                module = SimpleNamespace(share=Mock())
+                importer = Mock(return_value=module) if available else Mock(side_effect=ImportError)
+                ns = {'__builtins__': dict(vars(builtins), __import__=importer)}
+                exec(code, ns)
+                self.assertIs(ns['share'], module.share if available else None)
+
+    def test_share_button_requires_kit_share(self):
+        for share in (None, Mock()):
+            with self.subTest(available=share is not None):
+                gtk = Mock()
+                ns = functions('show_end', namespace={
+                    'Gtk': gtk, 'share': share, 'original_of': lambda pic: None})
+                pic = {'name': 'Picture'}
+                app = SimpleNamespace(
+                    end_bar=None, board=SimpleNamespace(pic=pic), board_box=Mock(),
+                    save_to_gallery=Mock(), see_again=Mock(), flip_original=Mock(),
+                    back=Mock())
+                ns['show_end'](app)
+                labels = [call.kwargs['label'] for call in gtk.Button.call_args_list]
+                self.assertEqual('Отправить' in labels, share is not None)
+                self.assertIn('Сохранить в Галерею', labels)
+                if share is not None:
+                    index = labels.index('Отправить')
+                    self.assertEqual(labels[index - 1], 'Сохранить в Галерею')
+                    callback = gtk.Button.return_value.connect.call_args_list[index].args[1]
+                    callback(None)
+                    app.save_to_gallery.assert_called_once_with(pic, send=True)
 
     def test_return_to_search_restarts_cancelled_thumbnails(self):
         import threading
