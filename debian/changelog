@@ -1,3 +1,9 @@
+haltia-paint (4.8.2) unstable; urgency=medium
+
+  * The program starts faster: its code is loaded already compiled.
+
+ -- Haltia <rensomail@gmail.com>  Wed, 28 Oct 2026 14:00:00 +0300
+
 haltia-paint (4.8.1) unstable; urgency=medium
 
   * Scale gallery thumbnails once per card size; draw the «Наверх» shadow
