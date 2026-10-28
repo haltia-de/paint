@@ -324,7 +324,9 @@ button.up {
   background-image: none;
   background-color: #3584e4;
   border: 1px solid #1c71d8;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  /* No blur: a blurred shadow is drawn again on every frame of a scroll
+     under it, and the CPU draws everything on the tablet. */
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
 }
 button.up label { color: #ffffff; }
 label.section {
@@ -2536,6 +2538,17 @@ class Paint:
 
         def draw(widget, cr):
             w, h = widget.get_allocated_width(), widget.get_allocated_height()
+            fitted = shown.get("fitted")
+            if fitted is not None:
+                if fitted[0] == (w, h):
+                    image = fitted[1]
+                    cr.set_source_surface(image, (w - image.get_width()) // 2,
+                                          (h - image.get_height()) // 2)
+                    cr.paint()
+                    return False
+                # The card changed size: the thumbnail again, fitted anew.
+                del shown["fitted"]
+                asked.clear()
             image = shown.get("image")
             if image is None:
                 # Kept as PNG most of the time; else drawn in a thread
@@ -2548,12 +2561,22 @@ class Paint:
                     self.thumb_pool.submit(self.make_thumb, pic, filled, done == total, widget,
                                            shown)
                 return False
+            # Scaled once to the card's size and kept instead of the
+            # thumbnail: FILTER_GOOD on every draw cost each redraw of the
+            # gallery, and the fitted image is smaller than the thumbnail.
             iw, ih = image.get_width(), image.get_height()
             k = min(w / iw, h / ih, 1.25)
-            cr.translate((w - iw * k) / 2, (h - ih * k) / 2)
-            cr.scale(k, k)
-            cr.set_source_surface(image, 0, 0)
-            cr.get_source().set_filter(cairo.FILTER_GOOD)
+            fw, fh = max(1, round(iw * k)), max(1, round(ih * k))
+            fit = cairo.ImageSurface(image.get_format(), fw, fh)
+            fcr = cairo.Context(fit)
+            fcr.scale(fw / iw, fh / ih)
+            fcr.set_source_surface(image, 0, 0)
+            fcr.get_source().set_filter(cairo.FILTER_GOOD)
+            fcr.paint()
+            del fcr
+            shown["fitted"] = ((w, h), fit)
+            shown.pop("image", None)
+            cr.set_source_surface(fit, (w - fw) // 2, (h - fh) // 2)
             cr.paint()
             return False
 
