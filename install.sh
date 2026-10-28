@@ -15,7 +15,23 @@ here=$(cd "$(dirname "$0")" && pwd)
 share=$root$prefix/share
 id=io.github.haltia_de.Paint
 old=io.github.trudenboy.Paint
-install -D -m 755 "$here/haltia-paint" "$root$prefix/bin/haltia-paint"
+# The program runs from PREFIX/lib/haltia-paint/haltia_paint_main.py as a module, so
+# Python loads it compiled (the package build writes its __pycache__);
+# Python never caches the script it is started by. PREFIX/bin/haltia-paint
+# is a stub that runs the module, so the command line stays
+# "python3 PREFIX/bin/haltia-paint" (the Haltia shell finds programs by it).
+lib=$prefix/lib/haltia-paint
+install -D -m 644 "$here/haltia-paint" "$root$lib/haltia_paint_main.py"
+install -d -m 755 "$root$prefix/bin"
+cat > "$root$prefix/bin/haltia-paint" <<EOF
+#!/usr/bin/env python3
+# Runs $lib/haltia_paint_main.py as a module, so Python loads it compiled.
+import runpy
+import sys
+sys.path.insert(0, "$lib")
+runpy.run_module("haltia_paint_main", run_name="__main__", alter_sys=False)
+EOF
+chmod 755 "$root$prefix/bin/haltia-paint"
 install -D -m 644 "$here/data/$id.desktop" "$share/applications/$id.desktop"
 install -D -m 644 "$here/data/$id.svg" "$share/icons/hicolor/scalable/apps/$id.svg"
 install -D -m 644 "$here/data/$id.metainfo.xml" "$share/metainfo/$id.metainfo.xml"

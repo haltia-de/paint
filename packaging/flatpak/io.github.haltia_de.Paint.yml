@@ -56,7 +56,20 @@ modules:
   - name: haltia-paint
     buildsystem: simple
     build-commands:
-      - install -D -m 755 haltia-paint /app/bin/haltia-paint
+      # The program runs from /app/lib/haltia-paint as a module, so Python loads it
+      # compiled; /app/bin/haltia-paint is the stub install.sh writes too.
+      - install -D -m 644 haltia-paint /app/lib/haltia-paint/haltia_paint_main.py
+      - install -d /app/bin
+      - |
+        cat > /app/bin/haltia-paint <<EOF
+        #!/usr/bin/env python3
+        # Runs /app/lib/haltia-paint/haltia_paint_main.py as a module, so Python loads it compiled.
+        import runpy
+        import sys
+        sys.path.insert(0, "/app/lib/haltia-paint")
+        runpy.run_module("haltia_paint_main", run_name="__main__", alter_sys=False)
+        EOF
+      - chmod 755 /app/bin/haltia-paint
       - install -D -m 644 pbn.py /app/lib/haltia-paint/pbn.py
       - install -D -m 644 -t /app/lib/haltia-paint/haltia_paint haltia_paint/*.py
       - install -D -m 644 -t /app/share/haltia-paint pictures/*.svgz
@@ -65,6 +78,7 @@ modules:
       - install -D -m 644 data/io.github.haltia_de.Paint.desktop /app/share/applications/io.github.haltia_de.Paint.desktop
       - install -D -m 644 data/io.github.haltia_de.Paint.svg /app/share/icons/hicolor/scalable/apps/io.github.haltia_de.Paint.svg
       - install -D -m 644 data/io.github.haltia_de.Paint.metainfo.xml /app/share/metainfo/io.github.haltia_de.Paint.metainfo.xml
+      - python3 -m compileall -q --invalidation-mode checked-hash /app/lib/haltia-paint
     sources:
       - type: dir
         path: ../..
