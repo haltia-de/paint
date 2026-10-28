@@ -122,7 +122,9 @@ sh install.sh /mnt/root       # в другой корень, например �
 sh install.sh "$pkgdir" /usr  # с префиксом /usr, как в пакете
 ```
 
-`install.sh [ROOT] [PREFIX]` кладёт программу в `PREFIX/bin/haltia-paint`,
+`install.sh [ROOT] [PREFIX]` кладёт программу модулем в
+`PREFIX/lib/haltia-paint/haltia_paint_main.py` (так Python берёт её уже
+скомпилированной), в `PREFIX/bin/haltia-paint` — короткий запускающий её файл,
 генератор в `PREFIX/lib/haltia-paint/pbn.py`, картины в
 `PREFIX/share/haltia-paint/`, `.desktop`-файл, значок hicolor и metainfo.
 При установке картины версии 2 убираются.

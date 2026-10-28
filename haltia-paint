@@ -165,11 +165,12 @@ except ImportError:
 
 from gi.repository import Gdk, GdkPixbuf, Gio, GLibUnix, Gtk, Pango  # noqa: E402
 
-# Installed as PREFIX/bin/haltia-paint: the pictures are in
-# PREFIX/share/haltia-paint, the generator in PREFIX/lib/haltia-paint; in a
-# checkout both are beside the program.
+# Installed, this code is PREFIX/lib/haltia-paint/haltia_paint_main.py (run
+# as a module by the stub PREFIX/bin/haltia-paint, so it loads compiled):
+# the pictures are in PREFIX/share/haltia-paint, the generator beside it in
+# PREFIX/lib/haltia-paint; in a checkout both are beside the program.
 HERE = os.path.dirname(os.path.realpath(__file__))
-PREFIX = os.path.dirname(HERE)
+PREFIX = os.path.dirname(os.path.dirname(HERE))
 BUILTIN = next((d for d in (os.path.join(HERE, "pictures"),
                             os.path.join(PREFIX, "share", "haltia-paint"))
                 if os.path.isdir(d)), os.path.join(PREFIX, "share", "haltia-paint"))

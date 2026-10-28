@@ -59,7 +59,17 @@ python3 pbn.py -v --level 3 IMAGE OUT.svgz     # one picture; levels 3/4/5 = ~30
 `BUILTIN`, `PBN` and the `haltia_paint` package are found beside the program
 in a checkout (`pictures/`, `pbn.py`, `haltia_paint/`), else under the install
 prefix (`PREFIX/share/haltia-paint/`, `PREFIX/lib/haltia-paint/pbn.py` and
-`.../haltia_paint/`).
+`.../haltia_paint/`), taken as two levels above the running code's folder.
+
+`install.sh` installs the script as the module
+`PREFIX/lib/haltia-paint/haltia_paint_main.py` and writes
+`PREFIX/bin/haltia-paint` as a stub that runs it with `runpy.run_module(...,
+alter_sys=False)`: Python never caches the script it is started by, so the
+program's code loads from the `__pycache__` the package build writes
+(haltia-de/ci compiles every module). `sys.argv` and the command line
+`python3 PREFIX/bin/haltia-paint` stay as they were (the Haltia shell finds
+programs by it); `__file__` is the module in `PREFIX/lib/haltia-paint`. The
+Flatpak manifest writes the same stub and compiles `/app/lib/haltia-paint`.
 
 The tablet (Lenovo B8000-H) is armv7, 1 GB RAM: `pbn.py` takes ~15 s for 300
 regions and ~20 s for 600 there, a full-screen redraw ~0.75 s. Commons
