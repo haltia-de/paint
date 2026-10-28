@@ -19,6 +19,18 @@
   <content_rating type="oars-1.1"/>
   <requires><control>touch</control></requires>
   <releases>
+    <release version="4.8.1" date="2026-10-28">
+      <description>
+        <ul>
+          <li>The gallery scrolls more lightly: thumbnails are scaled once to the card's size, and the «Наверх» (Back to top) button's shadow is drawn without blur.</li>
+          <li>The README explains how to send a finished picture and open a shared photo.</li>
+        </ul>
+        <ul>
+          <li xml:lang="ru">Галерея прокручивается легче: миниатюры уменьшаются один раз под размер карточки, а тень кнопки «Наверх» рисуется без размытия.</li>
+          <li xml:lang="ru">В описании программы рассказано, как отправить готовую картину и открыть присланную фотографию.</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.8.0" date="2026-10-22">
       <description>
         <ul>

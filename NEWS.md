@@ -1,5 +1,17 @@
 # Что нового · What's new
 
+## 4.8.1 (2026-10-28)
+
+### Русский
+
+- Галерея прокручивается легче: миниатюры уменьшаются один раз под размер карточки, а тень кнопки «Наверх» рисуется без размытия.
+- В описании программы рассказано, как отправить готовую картину и открыть присланную фотографию.
+
+### English
+
+- The gallery scrolls more lightly: thumbnails are scaled once to the card's size, and the «Наверх» (Back to top) button's shadow is drawn without blur.
+- The README explains how to send a finished picture and open a shared photo.
+
 ## 4.8.0 (2026-10-22)
 
 ### Русский
