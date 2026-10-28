@@ -1,3 +1,10 @@
+haltia-paint (4.8.1) unstable; urgency=medium
+
+  * Scale gallery thumbnails once per card size; draw the «Наверх» shadow
+    without blur.
+
+ -- Haltia <rensomail@gmail.com>  Wed, 28 Oct 2026 12:00:00 +0300
+
 haltia-paint (4.8.0) unstable; urgency=medium
 
   * Send a finished picture to another program, such as Messages.
