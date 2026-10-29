@@ -153,7 +153,6 @@ ON_HALTIA = "Haltia" in os.environ.get("XDG_CURRENT_DESKTOP", "").split(":")
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-gi.require_version("GLibUnix", "2.0")
 gi.require_version("GdkPixbuf", "2.0")
 from haltia_kit import dialogs, paths  # noqa: E402
 from haltia_kit.settings import Settings  # noqa: E402
@@ -163,7 +162,7 @@ try:
 except ImportError:
     share = None
 
-from gi.repository import Gdk, GdkPixbuf, Gio, GLibUnix, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, GdkPixbuf, Gio, Gtk, Pango  # noqa: E402
 
 # Installed, this code is PREFIX/lib/haltia-paint/haltia_paint_main.py (run
 # as a module by the stub PREFIX/bin/haltia-paint, so it loads compiled):
@@ -2173,7 +2172,8 @@ class Paint:
         self.win.connect("key-press-event", self.on_key)
         self.win.connect("button-press-event", self.on_button)
         # Progress is written a moment after a tap; write it on the way out.
-        GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self.quit)
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signum, self.quit)
         self.stack = Gtk.Stack()
         # Only the page shown sets how low the window can be: the search
         # page has to fit above the on-screen keyboard (the tablet's 800 px
